@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "479172532683",
+    "project_id": "tobis-e99b7",
+    "storage_bucket": "tobis-e99b7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:479172532683:android:c69160c7ffc8d15ef2fe4e",
+        "android_client_info": {
+          "package_name": "com.example.bus_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB5ZWurmzxCJhT2eqMiLrdH7oWkuRpc-zk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:479172532683:android:9a71819949644903f2fe4e",
+        "android_client_info": {
+          "package_name": "com.softelligy.to_bus_tracking_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB5ZWurmzxCJhT2eqMiLrdH7oWkuRpc-zk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
