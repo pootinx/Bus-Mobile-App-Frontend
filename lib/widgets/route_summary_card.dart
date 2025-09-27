@@ -302,7 +302,7 @@ class _RouteSummaryCardV1State extends State<RouteSummaryCardV1> with SingleTick
                       const Icon(Icons.directions_bus, size: 18, color: Colors.deepPurple),
                       const SizedBox(width: 6),
                       Text(
-                        "${startTime} → ${endTime}",
+                        "$startTime → $endTime",
                         // "${adjustTime(startTime, -result.distanceToStart)} → ${adjustTime(endTime, result.distanceToEnd)}",
                         style: TextStyle(
                           fontSize: screenWidth < 360 ? 13 : 15,

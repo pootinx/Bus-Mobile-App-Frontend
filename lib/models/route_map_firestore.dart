@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:bus_app/models/firestore_route_result.dart';
 import 'package:bus_app/models/route_frbase.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -109,7 +108,9 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       permission = await Geolocator.requestPermission();
     }
     if (permission == LocationPermission.deniedForever ||
-        permission == LocationPermission.denied) return;
+        permission == LocationPermission.denied) {
+      return;
+    }
 
     _positionStream = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(

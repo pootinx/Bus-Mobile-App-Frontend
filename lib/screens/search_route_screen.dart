@@ -1,5 +1,4 @@
 import 'package:bus_app/models/directions_response.dart' hide LatLng;
-import 'package:bus_app/models/firestore_route_result.dart';
 import 'package:bus_app/models/route_frbase.dart';
 import 'package:bus_app/screens/search_route_screen/trip_card.dart';
 import 'package:bus_app/services/firestore_route_service.dart';

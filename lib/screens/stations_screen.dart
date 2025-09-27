@@ -257,8 +257,12 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
     if (t.isEmpty) return s.length;
 
     List<List<int>> dp = List.generate(s.length + 1, (_) => List.filled(t.length + 1, 0));
-    for (int i = 0; i <= s.length; i++) dp[i][0] = i;
-    for (int j = 0; j <= t.length; j++) dp[0][j] = j;
+    for (int i = 0; i <= s.length; i++) {
+      dp[i][0] = i;
+    }
+    for (int j = 0; j <= t.length; j++) {
+      dp[0][j] = j;
+    }
 
     for (int i = 1; i <= s.length; i++) {
       for (int j = 1; j <= t.length; j++) {

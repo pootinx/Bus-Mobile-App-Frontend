@@ -21,7 +21,7 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
 
   List<FirestoreRouteResultV1>? firestoreResults;
   bool isLoading = false;
-  int _currentIndex = 0;
+  final int _currentIndex = 0;
   bool _hasInitialized = false; // Add flag to prevent multiple calls
 
   @override

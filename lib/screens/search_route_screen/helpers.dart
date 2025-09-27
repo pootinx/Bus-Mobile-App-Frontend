@@ -1,4 +1,3 @@
-import 'package:latlong2/latlong.dart';
 
 class LatLng {
   final double latitude;

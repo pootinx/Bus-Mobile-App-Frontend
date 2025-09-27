@@ -1,7 +1,6 @@
 import 'package:bus_app/models/route_frbase.dart';
 import 'package:bus_app/models/route_map_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:bus_app/models/firestore_route_result.dart';
 import 'helpers.dart';
 
 class TripCard extends StatelessWidget {
