@@ -282,29 +282,28 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
       ),
       child: Column(
         children: [
-          // Uncomment if you want to show departure field
-          // Row(
-          //   children: [
-          //     const Padding(
-          //       padding: EdgeInsets.symmetric(horizontal: 8),
-          //       child: Icon(Icons.circle, color: Colors.green, size: 16),
-          //     ),
-          //     Expanded(
-          //       child: TextField(
-          //         controller: departController,
-          //         decoration: const InputDecoration(
-          //           hintText: "Lieu de départ",
-          //           border: InputBorder.none,
-          //         ),
-          //       ),
-          //     ),
-          //     IconButton(
-          //       icon: const Icon(Icons.my_location, color: Colors.orange),
-          //       onPressed: setCurrentLocationAsDeparture,
-          //     ),
-          //   ],
-          // ),
-          // const Divider(height: 1),
+          Row(
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Icon(Icons.circle, color: Colors.green, size: 16),
+              ),
+              Expanded(
+                child: TextField(
+                  controller: departController,
+                  decoration: const InputDecoration(
+                    hintText: "Start Location",
+                    border: InputBorder.none,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.my_location, color: Colors.orange),
+                onPressed: setCurrentLocationAsDeparture,
+              ),
+            ],
+          ),
+          const Divider(height: 1),
           Row(
             children: [
               const Padding(
