@@ -49,7 +49,4 @@ app.*.map.json
 
 # Android build files
 
-/android/app/build/
-/android/app/build/outputs/
-/android/app/build/intermediates/
-/android/app/build/outputs/apk/
+
