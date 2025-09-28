@@ -1,4 +1,6 @@
 # Miscellaneous
+*.apk
+*.so
 *.class
 *.log
 *.pyc
@@ -44,7 +46,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+
 # Android build files
+
 /android/app/build/
 /android/app/build/outputs/
 /android/app/build/intermediates/
