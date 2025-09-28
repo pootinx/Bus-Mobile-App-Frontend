@@ -575,11 +575,13 @@ void _selectStop(Map<String, dynamic> stop) {
                       ),
                       onTap: () {
                         Navigator.pop(ctx);
-                        Navigator.push(
+                        Navigator.pushNamed(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => BusLineDetailsScreen(lineData: line),
-                          ),
+                          '/line_details',
+                          arguments: {
+                            'lineId': line['line_id'],
+                            'lineName': line['route_name']
+                          },
                         );
                       },
                     );

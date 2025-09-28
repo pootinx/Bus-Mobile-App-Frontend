@@ -75,16 +75,8 @@ class MyApp extends StatelessWidget {
         // '/search': (context) => const SearchRouteScreen(),
         '/lines': (context) => const BusLinesScreen(),
         '/stations': (context) => const StationsScreen(),
+         '/line_details': (context) => const BusLineDetailsScreen(),
         '/add_bus': (context) => const AddBusScreen(), 
-      },
-      onGenerateRoute: (settings) {
-        if (settings.name == '/line_details') {
-          return MaterialPageRoute(
-            builder: (_) => const BusLineDetailsScreen(),
-            settings: settings,
-          );
-        }
-        return null;
       },
     );
   }
