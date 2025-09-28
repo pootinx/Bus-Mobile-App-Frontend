@@ -1,11 +1,71 @@
-import 'package:bus_app/models/route_frbase.dart';
-import 'package:bus_app/models/route_map_firestore.dart';
-import 'package:bus_app/screens/search_firebase/frbase.dart';
-import 'package:bus_app/widgets/route_summary_card.dart';
+
+import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart' show LatLng;
+import 'package:http/http.dart' as http;
+
+// --- Data Models for Tobis API ---
+
+class TobisRoute {
+  final int lineId;
+  final String routeName;
+  final String startStopArrivalTime;
+  final String arrivalTime;
+  final int rideEtaMin;
+  final List<TobisStop> stops;
+
+  TobisRoute({
+    required this.lineId,
+    required this.routeName,
+    required this.startStopArrivalTime,
+    required this.arrivalTime,
+    required this.rideEtaMin,
+    required this.stops,
+  });
+
+  factory TobisRoute.fromJson(Map<String, dynamic> json) {
+    var stopsList = json['stops'] as List<dynamic>? ?? [];
+    List<TobisStop> stops = stopsList.map((i) => TobisStop.fromJson(i)).toList();
+
+    // FIX: The true arrival time is the time of the last stop.
+    String finalArrivalTime = (stops.isNotEmpty) ? stops.last.time : 'N/A';
+
+    return TobisRoute(
+      lineId: json['line_id'],
+      routeName: json['route_name'],
+      startStopArrivalTime: json['start_stop_arrival_time'] ?? 'N/A',
+      arrivalTime: finalArrivalTime, // Use the corrected arrival time
+      rideEtaMin: json['ride_eta_min'] ?? 0,
+      stops: stops,
+    );
+  }
+}
+
+class TobisStop {
+  final int id;
+  final String name;
+  final int etaMinFromStart;
+  final String time;
+
+  TobisStop({
+    required this.id,
+    required this.name,
+    required this.etaMinFromStart,
+    required this.time,
+  });
+
+  factory TobisStop.fromJson(Map<String, dynamic> json) {
+    return TobisStop(
+      id: json['id'],
+      name: json['name'],
+      etaMinFromStart: json['eta_min_from_start'],
+      time: json['time'],
+    );
+  }
+}
+
 
 class SearchRouteScreenV1 extends StatefulWidget {
   const SearchRouteScreenV1({super.key});
@@ -17,12 +77,14 @@ class SearchRouteScreenV1 extends StatefulWidget {
 class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
   final TextEditingController departController = TextEditingController();
   final TextEditingController arriveeController = TextEditingController();
-  final FirestoreRouteServiceV2 firestoreService = FirestoreRouteServiceV2();
+  
+  List<TobisRoute>? tobisRoutes;
+  Position? _startPosition;
+  Map<String, dynamic>? _destination;
 
-  List<FirestoreRouteResultV1>? firestoreResults;
   bool isLoading = false;
   final int _currentIndex = 0;
-  bool _hasInitialized = false; // Add flag to prevent multiple calls
+  bool _hasInitialized = false;
 
   @override
   void didChangeDependencies() {
@@ -30,159 +92,124 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
     final args = ModalRoute.of(context)?.settings.arguments;
     if (args is String && args.isNotEmpty) {
       arriveeController.text = args;
+       if (_hasInitialized) {
+        searchRoutes();
+      }
     }
   }
 
   @override
   void initState() {
     super.initState();
-    // Initialize search only once when widget is first created
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_hasInitialized) {
         _hasInitialized = true;
-        _initializeSearch();
       }
     });
   }
 
-  // Separate initialization method
-  Future<void> _initializeSearch() async {
-    if (arriveeController.text.isNotEmpty) {
-      await searchRoutes();
-    }
+  Future<Position> _getCoordinatesFromAddress(String address) async {
+      List<Location> locations = await locationFromAddress(address);
+      if (locations.isEmpty) {
+        throw Exception("Address not found: $address");
+      }
+      final loc = locations.first;
+      return Position(latitude: loc.latitude, longitude: loc.longitude, timestamp: DateTime.now(), accuracy: 100, altitude: 0, heading: 0, speed: 0, speedAccuracy: 0, altitudeAccuracy: 0, headingAccuracy: 0);
   }
 
-  Future<void> searchRoutes() async {
-    final arrivee = arriveeController.text.trim();
 
-    if (arrivee.isEmpty) {
+  Future<void> searchRoutes() async {
+    final startAddress = departController.text.trim();
+    final destinationAddress = arriveeController.text.trim();
+
+    if (destinationAddress.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Merci de renseigner une destination')),
+          const SnackBar(content: Text('Please enter a destination')),
         );
       }
       return;
     }
 
-    if (mounted) {
-      setState(() {
-        isLoading = true;
-        firestoreResults = null;
-      });
-    }
+    setState(() {
+      isLoading = true;
+      tobisRoutes = null;
+      _startPosition = null;
+      _destination = null;
+    });
 
     try {
-      // 1. Get user location and resolve city + readable location name
-      final position = await firestoreService.getUserLocation();
-      final detectedCity = await firestoreService.getCityNameFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-      var departLocationName = await firestoreService.getLocationNameFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
+      Position startPosition;
 
-      print("---------object $departLocationName");
-
-      // 2. Match detected city to Firestore cities
-      final firestoreCities = await firestoreService.getCitiesFromFirestore();
-      final matchedCity = firestoreService.matchCity(detectedCity, firestoreCities) ?? "tetouane";
-
-      // 3. Get coordinates from names
-      var startCoords = LatLng(position.latitude, position.longitude); // Use actual GPS
-      final endCoords = await getCoordinatesFromPlaceName('$arrivee, $matchedCity');
-
-      if (endCoords == null) {
-        throw Exception("Impossible de localiser la destination : $arrivee");
+      if (startAddress.isNotEmpty) {
+        startPosition = await _getCoordinatesFromAddress(startAddress);
+      } else {
+          LocationPermission permission = await Geolocator.checkPermission();
+          if (permission == LocationPermission.denied) {
+            permission = await Geolocator.requestPermission();
+          }
+          if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
+            throw Exception("Location permission is required if you don't enter a starting address.");
+          }
+          startPosition = await Geolocator.getCurrentPosition();
+          if (mounted) {
+             List<Placemark> placemarks = await placemarkFromCoordinates(startPosition.latitude, startPosition.longitude);
+             if(placemarks.isNotEmpty){
+                final place = placemarks.first;
+                departController.text = "${place.street}, ${place.locality}";
+             }
+          }
       }
 
-      // test (remove this in production)
-      departLocationName = "Aéroport, $matchedCity";
-      startCoords = LatLng(35.591311025851894, -5.33091575508334);
+      final baseUrl = "https://tobis-backend.onrender.com/itinerary/routes";
+      final params = {
+        'dest_add': destinationAddress,
+        'start_lat': startPosition.latitude.toString(),
+        'start_lon': startPosition.longitude.toString(),
+        'limit': '5',
+        'city_id': '1', 
+      };
+      final uri = Uri.parse(baseUrl).replace(queryParameters: params);
+      
+      final response = await http.get(uri);
 
-      // 4. Search routes
-      final results = await firestoreService.searchCityRoutesByCoords(
-        cityName: matchedCity,
-        startCoords: startCoords,
-        endCoords: endCoords,
-        startAddress: departLocationName,
-        endAddress: arrivee,
-      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final lines = data['lines'] as List;
+        final results = lines.map((line) => TobisRoute.fromJson(line)).toList();
 
-      if (mounted) {
         setState(() {
-          firestoreResults = results;
+          tobisRoutes = results;
+          _startPosition = startPosition;
+          _destination = data['destination'];
           isLoading = false;
         });
 
         if (results.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Aucun itinéraire trouvé depuis votre position")),
+            const SnackBar(content: Text("No routes found for the given locations")),
           );
         }
-      }
-
-      print("✅ Trajet trouvé depuis: $departLocationName → $arrivee ($matchedCity)");
-    } catch (e) {
-      if (mounted) {
-        setState(() => isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Erreur lors de la recherche : $e")),
-        );
-      }
-    }
-  }
-
-  Future<LatLng?> getCoordinatesFromPlaceName(String placeName) async {
-    try {
-      List<Location> locations = await locationFromAddress(placeName);
-
-      if (locations.isNotEmpty) {
-        final loc = locations.first;
-        return LatLng(loc.latitude, loc.longitude);
-      }
-    } catch (e) {
-      print('❌ Error getting coordinates for "$placeName": $e');
-    }
-
-    return null; // Not found or error
-  }
-
-  Future<void> getPlaceNameFromLatLng(LatLng position) async {
-    try {
-      List<Placemark> placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
-
-      if (placemarks.isNotEmpty) {
-        Placemark place = placemarks.first;
-        String name = [
-          place.name,
-          place.street,
-          place.locality,
-          place.administrativeArea,
-          place.country
-        ].where((s) => s != null && s.trim().isNotEmpty).join(", ");
-
-        print("📍 Place name: $name");
       } else {
-        print("⚠️ No placemark found");
+        throw Exception('Failed to load routes: ${response.statusCode} ${response.body}');
       }
     } catch (e) {
-      print("❌ Error in reverse geocoding: $e");
+      setState(() => isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error searching for routes: $e")),
+      );
     }
   }
-
+  
   Future<void> setCurrentLocationAsDeparture() async {
     try {
+      setState(() { isLoading = true; });
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
-        throw Exception("Permission refusée");
+        throw Exception("Location permission denied");
       }
 
       Position position = await Geolocator.getCurrentPosition();
@@ -192,12 +219,14 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
         final place = placemarks.first;
         setState(() {
           departController.text = "${place.street}, ${place.locality}";
+          isLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
+        setState(() { isLoading = false; });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur localisation: $e')),
+          SnackBar(content: Text('Error getting location: $e')),
         );
       }
     }
@@ -211,41 +240,15 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
     }
   }
 
-  String _calculerDureeParcourue(String startTime, String endTime) {
-    try {
-      final format = RegExp(r'^(\d{2}):(\d{2}):(\d{2})$');
-      if (format.hasMatch(startTime) && format.hasMatch(endTime)) {
-        final startParts = startTime.split(':').map(int.parse).toList();
-        final endParts = endTime.split(':').map(int.parse).toList();
-
-        final start = DateTime(2023, 1, 1, startParts[0], startParts[1], startParts[2]);
-        final end = DateTime(2023, 1, 1, endParts[0], endParts[1], endParts[2]);
-
-        Duration diff = end.difference(start);
-        if (diff.isNegative) {
-          diff += const Duration(hours: 24);
-        }
-
-        final heures = diff.inHours;
-        final minutes = diff.inMinutes % 60;
-
-        return heures > 0 ? "$heures heure${heures > 1 ? 's' : ''} $minutes min" : "$minutes min";
-      }
-    } catch (_) {}
-    return "Durée inconnue";
-  }
-
-  String _getFirstStopName(List<Map<String, dynamic>> stops) =>
-      stops.isNotEmpty ? stops.first['name'] ?? 'Arrêt inconnu' : 'Arrêt inconnu';
-
-  String _getLastStopName(List<Map<String, dynamic>> stops) =>
-      stops.isNotEmpty ? stops.last['name'] ?? 'Arrêt inconnu' : 'Arrêt inconnu';
-
   @override
   Widget build(BuildContext context) {
-    // REMOVED: searchRoutes() call from here - this was causing infinite rebuilds
     return Scaffold(
-      appBar: AppBar(title: const Text("Rechercher un itinéraire")),
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: const Text("Rechercher un itinéraire"),
+        backgroundColor: Colors.white,
+        elevation: 0,
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -254,8 +257,8 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
             const SizedBox(height: 16),
             if (isLoading)
               const Center(child: CircularProgressIndicator()),
-            if (!isLoading && firestoreResults != null)
-              Expanded(child: _buildFirestoreResults()),
+            if (!isLoading && tobisRoutes != null)
+              Expanded(child: _buildTobisResults()),
           ],
         ),
       ),
@@ -274,50 +277,98 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
   }
 
   Widget _buildSearchBar() {
-    return Container(
+     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: -5)],
       ),
+      padding: const EdgeInsets.all(16.0),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
+          // From field
           Row(
             children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Icon(Icons.circle, color: Colors.green, size: 16),
-              ),
+              const Icon(Icons.gps_fixed, color: Colors.grey),
+              const SizedBox(width: 16),
               Expanded(
-                child: TextField(
-                  controller: departController,
-                  decoration: const InputDecoration(
-                    hintText: "Start Location",
-                    border: InputBorder.none,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("From", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                    TextField(
+                      controller: departController,
+                      decoration: const InputDecoration(
+                        hintText: "Current Location (or type address)",
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ],
                 ),
               ),
-              IconButton(
+               IconButton(
                 icon: const Icon(Icons.my_location, color: Colors.orange),
                 onPressed: setCurrentLocationAsDeparture,
               ),
             ],
           ),
-          const Divider(height: 1),
+          // Divider and Swap button
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Row(
+              children: [
+                const Expanded(child: Divider()),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: Material(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () {
+                        final temp = departController.text;
+                        setState(() {
+                          departController.text = arriveeController.text;
+                          arriveeController.text = temp;
+                        });
+                      },
+                      child: const Padding(
+                        padding: EdgeInsets.all(4.0),
+                        child: Icon(Icons.swap_vert, color: Colors.blue, size: 20),
+                      ),
+                    ),
+                  ),
+                ),
+                 const Expanded(child: Divider()),
+              ],
+            ),
+          ),
+          // To field
           Row(
             children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Icon(Icons.flag, color: Colors.red, size: 16),
-              ),
+              const Icon(Icons.location_on, color: Colors.red),
+              const SizedBox(width: 16),
               Expanded(
-                child: TextField(
-                  controller: arriveeController,
-                  decoration: const InputDecoration(
-                    hintText: "Destination",
-                    border: InputBorder.none,
-                  ),
-                  onSubmitted: (_) => searchRoutes(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("To", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                    TextField(
+                      controller: arriveeController,
+                      decoration: const InputDecoration(
+                        hintText: "Where are you going?",
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                       onSubmitted: (_) => searchRoutes(),
+                    ),
+                  ],
                 ),
               ),
               IconButton(
@@ -331,114 +382,174 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
     );
   }
 
-  Widget _buildFirestoreResults() {
-    if (firestoreResults!.isEmpty) {
+  Widget _buildTobisResults() {
+    if (tobisRoutes == null || tobisRoutes!.isEmpty) {
       return const Center(
-        child: Text("Aucun itinéraire trouvé", style: TextStyle(fontSize: 16, color: Colors.grey)),
+        child: Text("No routes found", style: TextStyle(fontSize: 16, color: Colors.grey)),
       );
     }
 
     return ListView.builder(
-      itemCount: firestoreResults!.length,
+      itemCount: tobisRoutes!.length,
       itemBuilder: (context, index) {
-        final result = firestoreResults![index];
-        return RouteSummaryCardV1(result: result);
+        final route = tobisRoutes![index];
+        return TobisRouteCard(
+          route: route,
+          startPosition: _startPosition!,
+          destination: _destination!,
+          ); 
       },
     );
   }
 
-  Widget _buildFirestoreRouteCard(FirestoreRouteResultV1 result) {
-    final duree = _calculerDureeParcourue(result.startTime, result.endTime);
-    final distance = result.busDistance;
-    final startTimeFormatted = result.startTime.substring(0, 5);
-    final endTimeFormatted = result.endTime.substring(0, 5);
+  @override
+  void dispose() {
+    departController.dispose();
+    arriveeController.dispose();
+    super.dispose();
+  }
+}
+
+// --- NEW WIDGET --- 
+class TobisRouteCard extends StatefulWidget {
+  final TobisRoute route;
+  final Position startPosition;
+  final Map<String, dynamic> destination;
+
+  const TobisRouteCard({Key? key, required this.route, required this.startPosition, required this.destination}) : super(key: key);
+
+  @override
+  _TobisRouteCardState createState() => _TobisRouteCardState();
+}
+
+class _TobisRouteCardState extends State<TobisRouteCard> {
+  bool _isExpanded = false;
+
+  Color _getColorForLine(String lineName) {
+    final hash = lineName.hashCode;
+    final r = (hash & 0xFF0000) >> 16;
+    final g = (hash & 0x00FF00) >> 8;
+    final b = hash & 0x0000FF;
+    return Color.fromRGBO(r, g, b, 1).withOpacity(0.8);
+  }
+
+  String _calculateDistance(){
+     final distance = Geolocator.distanceBetween(
+      widget.startPosition.latitude,
+      widget.startPosition.longitude,
+      widget.destination['lat'],
+      widget.destination['lon'],
+    );
+    return '${(distance / 1000).toStringAsFixed(2)} km';
+  }
+
+  String _calculateDuration() {
+    final startTimeString = widget.route.startStopArrivalTime;
+    final endTimeString = widget.route.arrivalTime;
+
+    if (startTimeString == 'N/A' || endTimeString == 'N/A') {
+      return '-- min';
+    }
+
+    try {
+        final startParts = startTimeString.split(':').map(int.parse).toList();
+        final endParts = endTimeString.split(':').map(int.parse).toList();
+
+        final start = DateTime(2023, 1, 1, startParts[0], startParts[1]);
+        final end = DateTime(2023, 1, 1, endParts[0], endParts[1]);
+
+        Duration diff = end.difference(start);
+        if (diff.isNegative) {
+          diff += const Duration(hours: 24); 
+        }
+        
+        return "${diff.inMinutes} min";
+    } catch (e) {
+        return '-- min';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final route = widget.route;
+    final lineColor = _getColorForLine(route.routeName);
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
-      child: Container(
-        padding: const EdgeInsets.all(16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 2,
+      color: Colors.deepPurple[50],
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.directions_bus, color: Colors.blue),
+                Icon(Icons.directions_bus, color: Colors.deepPurple[700]),
                 const SizedBox(width: 8),
-                Text("$startTimeFormatted → $endTimeFormatted", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Text("${route.startStopArrivalTime} → ${route.arrivalTime}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Text("(${_calculateDuration()})", style: TextStyle(fontSize: 14, color: Colors.deepPurple[800], fontWeight: FontWeight.w500)),
                 const Spacer(),
-                Text("$distance km", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w500)),
+                 Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple[100],
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(_calculateDistance(), style: TextStyle(color: Colors.deepPurple[800], fontWeight: FontWeight.w500)),
+                ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(duree, style: const TextStyle(color: Colors.blue, fontSize: 16)),
             const SizedBox(height: 12),
             Row(
               children: [
-                const Icon(Icons.directions_walk, color: Colors.blue, size: 20),
-                const SizedBox(width: 8),
-                const Icon(Icons.arrow_forward, size: 16),
-                const SizedBox(width: 8),
+                const Icon(Icons.directions_walk, color: Colors.blue),
+                const SizedBox(width: 4), 
+                const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
+                const SizedBox(width: 4),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: Color(result.colorValue),
-                    borderRadius: BorderRadius.circular(4),
+                    color: lineColor,
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text(result.lineName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: Text(route.routeName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                 ),
-                const SizedBox(width: 8),
-                const Icon(Icons.arrow_forward, size: 16),
-                const SizedBox(width: 8),
-                const Icon(Icons.directions_walk, color: Colors.blue, size: 20),
+                const SizedBox(width: 4),
+                const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
+                const SizedBox(width: 4),
+                const Icon(Icons.location_on, color: Colors.red),
               ],
             ),
             const SizedBox(height: 12),
             InkWell(
-              onTap: () => _showRouteDetails(result),
-              child: const Row(
+              onTap: () => setState(() => _isExpanded = !_isExpanded),
+              child: Row(
                 children: [
-                  Icon(Icons.keyboard_arrow_up, color: Colors.blue),
-                  Text("Voir les détails", style: TextStyle(color: Colors.blue)),
+                  Icon(_isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: Colors.blue),
+                  const SizedBox(width: 4),
+                  Text(_isExpanded ? "Masquer les détails" : "Détails", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showRouteDetails(FirestoreRouteResultV1 result) {
-    final firstStop = _getFirstStopName(result.stops);
-    final lastStop = _getLastStopName(result.stops);
-
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Détails du trajet - Ligne ${result.lineName}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            _buildDetailRow(Icons.directions_walk, "Marcher jusqu'à $firstStop"),
-            _buildDetailRow(Icons.directions_bus, "Bus ligne ${result.lineName} vers .."),
-            _buildDetailRow(Icons.directions_walk, "Marcher depuis $lastStop"),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => RouteMapScreen.fromFirestore(result)),
-                  );
-                },
-                child: const Text("Voir sur la carte"),
-              ),
-            ),
+            if (_isExpanded)
+              Padding(
+                padding: const EdgeInsets.only(top: 12.0),
+                child: Column(
+                   crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildDetailRow(Icons.directions_walk, "Marcher jusqu'à ${route.stops.first.name}"),
+                    _buildDetailRow(Icons.directions_bus, "Bus ligne ${route.routeName} vers ${widget.destination['name']}"),
+                    const SizedBox(height: 8),
+                    ...route.stops.map((stop) => Padding(
+                      padding: const EdgeInsets.only(left: 16.0, bottom: 4.0),
+                      child: Text("• ${stop.name} à ${stop.time}", style: TextStyle(color: Colors.grey[700])),
+                    )).toList(),
+                  ],
+                ),
+              )
           ],
         ),
       ),
@@ -450,18 +561,11 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(icon, color: Colors.blue),
+          Icon(icon, color: Colors.blue, size: 20),
           const SizedBox(width: 12),
-          Expanded(child: Text(text)),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 15))),
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    departController.dispose();
-    arriveeController.dispose();
-    super.dispose();
   }
 }
