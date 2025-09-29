@@ -1,10 +1,10 @@
+
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:bus_app/screens/bus_line_details_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -36,7 +36,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
   void initState() {
     super.initState();
     fetchAndPrintCities();
-    // _startLocationTracking();
     _startLocationTrackingAndAutoSearch();
   }
 
@@ -61,9 +60,7 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
     desiredAccuracy: LocationAccuracy.high,
   );
 
-  // test (remove this in production)
-  final latLng = LatLng(35.591311025851894, -5.3309157550833);
-  // final latLng = LatLng(position.latitude, position.longitude);
+  final latLng = LatLng(position.latitude, position.longitude);
   setState(() {
     userLocation = latLng;
     _userMarker = Marker(
@@ -85,7 +82,7 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
       if (city != null && city.isNotEmpty) {
         print("📍 Current city: $city");
         _mapController.move(latLng, 14);
-        _fetchStopsFromLines(city); // Automatically fetch and show bus stops
+        _fetchStopsFromLines(city);
       }
     }
   } catch (e) {
@@ -93,35 +90,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
   }
 }
 
-
-  void _startLocationTracking() async {
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
-      setState(() => locationPermissionDenied = true);
-      return;
-    }
-
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-      ),
-    ).listen((position) {
-      final latLng = LatLng(position.latitude, position.longitude);
-      setState(() {
-        userLocation = latLng;
-        _userMarker = Marker(
-          point: latLng,
-          width: 40,
-          height: 40,
-          child: const Icon(Icons.person_pin_circle, color: Colors.blue, size: 40),
-        );
-      });
-    });
-  }
 
   void fetchAndPrintCities() async {
     moroccoCities = await getFirestoreCities();
@@ -278,37 +246,34 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
     return dp[s.length][t.length];
   }
 
-  Future<void> _onSearchSubmitted(String query) async {
-    if (query.trim().isEmpty) return;
-    try {
-      final locations = await locationFromAddress(query);
-      if (locations.isNotEmpty) {
-        final loc = locations.first;
-        final newLoc = LatLng(loc.latitude, loc.longitude);
-        setState(() {
-          userLocation = newLoc;
-          _userMarker = Marker(
-            point: newLoc,
-            width: 40,
-            height: 40,
-            child: const Icon(Icons.person_pin_circle, color: Colors.blue, size: 40),
-          );
-          selectedStop = null;
-          stopsMap.clear();
-        });
-        _mapController.move(newLoc, 14);
-        _fetchStopsFromLines(query);
-      }
-    } catch (_) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Adresse non trouvée.')),
-      );
-    }
-  }
-
   List<LatLng> _decodePolyline(String encoded) {
-    final points = PolylinePoints().decodePolyline(encoded);
-    return points.map((p) => LatLng(p.latitude, p.longitude)).toList();
+    List<LatLng> polyline = [];
+    int index = 0, len = encoded.length;
+    int lat = 0, lng = 0;
+
+    while (index < len) {
+      int b, shift = 0, result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lng += dlng;
+
+      polyline.add(LatLng(lat / 1E5, lng / 1E5));
+    }
+    return polyline;
   }
 
   List<LatLng> _smoothTrajectory(List<LatLng> trajectory) {
@@ -400,26 +365,6 @@ Widget build(BuildContext context) {
         backgroundColor: const Color(0xFF1E3A8A),
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Text('Arrêts à proximité', style: TextStyle(color: Colors.white)),
-        // bottom: PreferredSize(
-        //   preferredSize: const Size.fromHeight(48),
-        //   child: Padding(
-        //     padding: const EdgeInsets.all(8),
-        //     child: TextField(
-        //       decoration: InputDecoration(
-        //         hintText: 'Rechercher une ville',
-        //         prefixIcon: const Icon(Icons.search),
-        //         filled: true,
-        //         fillColor: Colors.white,
-        //         contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-        //         border: OutlineInputBorder(
-        //           borderRadius: BorderRadius.circular(30),
-        //           borderSide: BorderSide.none,
-        //         ),
-        //       ),
-        //       onSubmitted: _onSearchSubmitted,
-        //     ),
-        //   ),
-        // ),
       ),
       body: Stack(
         children: [
@@ -498,44 +443,11 @@ List<Map<String, dynamic>> removeDuplicateLinesByRouteName(List<Map<String, dyna
       }
     }).toList();
 
-    // Sort lines by "prochaine_arrivee"
-    uniqueLines.sort((a, b) {
-      final aTime = a['prochaine_arrivee'];
-      final bTime = b['prochaine_arrivee'];
-
-      // Handle nulls and assume time format like "HH:mm"
-      if (aTime == null) return 1;
-      if (bTime == null) return -1;
-
-      try {
-        final aParsed = _parseTimeString(aTime);
-        final bParsed = _parseTimeString(bTime);
-        return aParsed.compareTo(bParsed);
-      } catch (e) {
-        return 0;
-      }
-    });
-
     stop['lines'] = uniqueLines;
   }
 
   return stopsList;
 }
-
-// Helper: Convert "HH:mm" string to DateTime for today
-DateTime _parseTimeString(String timeStr) {
-  final parts = timeStr.split(":");
-  final now = DateTime.now();
-  return DateTime(
-    now.year,
-    now.month,
-    now.day,
-    int.parse(parts[0]),
-    int.parse(parts[1]),
-  );
-}
-
-
 
 void _selectStop(Map<String, dynamic> stop) {
     setState(() => selectedStop = stop);
@@ -561,11 +473,9 @@ void _selectStop(Map<String, dynamic> stop) {
                   itemBuilder: (context, index) {
                     final line = uniqueLines[index];
                     final lineId = line['line_id'];
-                    final arrival = line['prochaine_arrivee'] ?? "Inconnu";
                     return ListTile(
                       leading: Icon(Icons.directions_bus, color: line['color_final']),
                       title: Text(line['route_name'] ?? 'Ligne $lineId'),
-                      subtitle: Text('Prochaine arrivée: $arrival'),
                       trailing: IconButton(
                         icon: Icon(_displayedLines.contains(lineId) ? Icons.visibility_off : Icons.visibility),
                         onPressed: () {
@@ -592,48 +502,4 @@ void _selectStop(Map<String, dynamic> stop) {
       },
     );
   }
-
-String _estimateNextArrivalTime(String lineId) {
-  final now = DateTime.now();
-  final randomMinutes = (lineId.hashCode % 15) + 2; // 2–16 minutes
-  final next = now.add(Duration(minutes: randomMinutes));
-  return "${next.hour.toString().padLeft(2, '0')}:${next.minute.toString().padLeft(2, '0')}";
-}
-
-
-
-  Widget _buildEnhancedStopDetailsSheet() => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(selectedStop?['name'] ?? 'Détails', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Divider(),
-            const Text('Itinéraires actifs:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            for (final id in _displayedLines)
-              Card(
-                margin: const EdgeInsets.only(bottom: 4),
-                child: ListTile(
-                  dense: true,
-                  leading: Container(width: 12, height: 12, decoration: BoxDecoration(color: _getLineColor(id), shape: BoxShape.circle)),
-                  title: Text('Ligne $id'),
-                  subtitle: Text(_calculateTrajectoryDistance(_lineTrajectories[id] ?? [])),
-                  trailing: IconButton(icon: const Icon(Icons.visibility_off, size: 18), onPressed: () => _toggleLineTrajectory(id)),
-                ),
-              ),
-          ],
-        ),
-      );
-
-  // Widget _buildMapControls() => Positioned(
-  //       bottom: 20,
-  //       right: 20,
-  //       child: Column(children: [
-  //         FloatingActionButton.small(heroTag: 'zoom_in', child: const Icon(Icons.add), onPressed: () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1)),
-  //         const SizedBox(height: 8),
-  //         FloatingActionButton.small(heroTag: 'zoom_out', child: const Icon(Icons.remove), onPressed: () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom - 1)),
-  //       ]),
-  //     );
 }

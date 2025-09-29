@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
+import 'bus_line_details_screen.dart';
+
 class BusLinesScreen extends StatefulWidget {
   const BusLinesScreen({super.key});
 
@@ -11,35 +13,60 @@ class BusLinesScreen extends StatefulWidget {
 }
 
 class _BusLinesScreenState extends State<BusLinesScreen> {
-  String? selectedCity;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  Widget build(BuildContext context) {
+    return Navigator(
+      key: _navigatorKey,
+      onGenerateRoute: (settings) {
+        return MaterialPageRoute(
+          builder: (context) => const CityListScreen(),
+        );
+      },
+    );
+  }
+}
+
+class CityListScreen extends StatefulWidget {
+  const CityListScreen({super.key});
+
+  @override
+  State<CityListScreen> createState() => _CityListScreenState();
+}
+
+class _CityListScreenState extends State<CityListScreen> {
   List<String> allCities = [];
-  Stream<QuerySnapshot>? cityStream;
-  final TextEditingController _searchController = TextEditingController();
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadCities();
-    _detectCityAndLoadLines();
+    _initialize();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  Future<void> _initialize() async {
+    await _loadCities();
+    await _detectAndNavigate();
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _loadCities() async {
     final snapshot = await FirebaseFirestore.instance.collection('cities').get();
-    final cities = snapshot.docs
-        .map((doc) => doc.data()['name']?.toString().toLowerCase().trim())
-        .where((name) => name != null && name.isNotEmpty)
-        .cast<String>()
-        .toList();
-    setState(() => allCities = cities);
+    if (mounted) {
+      final cities = snapshot.docs
+          .map((doc) => doc.data()['name']?.toString().toLowerCase().trim())
+          .whereType<String>()
+          .toList();
+      setState(() => allCities = cities);
+    }
   }
 
-  Future<void> _detectCityAndLoadLines() async {
+  Future<void> _detectAndNavigate() async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -53,87 +80,21 @@ class _BusLinesScreenState extends State<BusLinesScreen> {
       final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
 
-      if (placemarks.isNotEmpty) {
+      if (placemarks.isNotEmpty && mounted) {
         final cityName = placemarks.first.locality?.toLowerCase().trim();
-        if (cityName != null && cityName.isNotEmpty) {
-          _searchController.text = cityName;
-          await _onSearchSubmitted(cityName);
+
+        if (cityName != null && allCities.contains(cityName)) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => BusLinesListScreen(city: cityName),
+            ),
+          );
         }
       }
     } catch (e) {
-      debugPrint("❌ Failed to detect city: $e");
+      debugPrint("❌ Failed to detect city or navigate: $e");
     }
-  }
-
-  Future<void> _onSearchSubmitted(String query) async {
-    if (query.trim().isEmpty || allCities.isEmpty) return;
-
-    final input = query.toLowerCase().trim();
-    allCities.sort((a, b) =>
-        _levenshteinDistance(input, a).compareTo(_levenshteinDistance(input, b)));
-
-    final bestMatch = allCities.first;
-    final snapshot = await FirebaseFirestore.instance.collection(bestMatch).limit(1).get();
-    if (snapshot.docs.isNotEmpty) {
-      setState(() {
-        selectedCity = bestMatch;
-        cityStream = FirebaseFirestore.instance.collection(bestMatch).snapshots();
-      });
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Aucune ville correspondante trouvée.")),
-      );
-    }
-  }
-
-  int _levenshteinDistance(String s, String t) {
-    if (s == t) return 0;
-    if (s.isEmpty) return t.length;
-    if (t.isEmpty) return s.length;
-
-    List<List<int>> dp = List.generate(
-      s.length + 1,
-      (_) => List.filled(t.length + 1, 0),
-    );
-
-    for (int i = 0; i <= s.length; i++) {
-      dp[i][0] = i;
-    }
-    for (int j = 0; j <= t.length; j++) {
-      dp[0][j] = j;
-    }
-
-    for (int i = 1; i <= s.length; i++) {
-      for (int j = 1; j <= t.length; j++) {
-        final cost = s[i - 1] == t[j - 1] ? 0 : 1;
-        dp[i][j] = [
-          dp[i - 1][j] + 1,
-          dp[i][j - 1] + 1,
-          dp[i - 1][j - 1] + cost,
-        ].reduce((a, b) => a < b ? a : b);
-      }
-    }
-
-    return dp[s.length][t.length];
-  }
-
-  Widget _buildCityList() {
-    return allCities.isEmpty
-        ? const Center(child: CircularProgressIndicator())
-        : ListView.builder(
-            itemCount: allCities.length,
-            itemBuilder: (context, index) {
-              final city = allCities[index];
-              return ListTile(
-                title: Text(city[0].toUpperCase() + city.substring(1)),
-                trailing: const Icon(Icons.location_city),
-                onTap: () async {
-                  _searchController.text = city;
-                  await _onSearchSubmitted(city);
-                },
-              );
-            },
-          );
   }
 
   @override
@@ -141,110 +102,128 @@ class _BusLinesScreenState extends State<BusLinesScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E3A8A),
-        iconTheme: const IconThemeData(color: Colors.white),
         title: const Text("Lignes de bus", style: TextStyle(color: Colors.white)),
-        actions: [
-          if (selectedCity != null)
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () {
-                setState(() {
-                  selectedCity = null;
-                  cityStream = null;
-                  _searchController.clear();
-                });
-              },
-            ),
-        ],
-        // bottom: PreferredSize(
-        //   preferredSize: const Size.fromHeight(48),
-        //   child: Padding(
-        //     padding: const EdgeInsets.all(8.0),
-        //     child: TextField(
-        //       controller: _searchController,
-        //       decoration: const InputDecoration(
-        //         hintText: 'Rechercher une ville...',
-        //         prefixIcon: Icon(Icons.search),
-        //         border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(30))),
-        //         filled: true,
-        //         fillColor: Colors.white,
-        //       ),
-        //       onSubmitted: _onSearchSubmitted,
-        //     ),
-        //   ),
-        // ),
       ),
-      body: selectedCity == null
-          ? _buildCityList()
-          : StreamBuilder<QuerySnapshot>(
-              stream: cityStream,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text("Aucune ligne trouvée."));
-                }
-
-                final seenNames = <String>{};
-                final docs = snapshot.data!.docs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final name = (data['route_name'] ?? doc.id).toString().trim();
-                  if (seenNames.contains(name)) return false;
-                  seenNames.add(name);
-                  return true;
-                }).toList();
-
-                docs.sort((a, b) {
-                  final dataA = a.data() as Map<String, dynamic>;
-                  final dataB = b.data() as Map<String, dynamic>;
-                  final routeNameA = (dataA['route_name'] ?? a.id).toString().trim();
-                  final routeNameB = (dataB['route_name'] ?? b.id).toString().trim();
-
-                  return _compareRouteNames(routeNameA, routeNameB);
-                });
-
-                return ListView.builder(
-                  itemCount: docs.length,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : allCities.isEmpty
+              ? const Center(child: Text("No cities found."))
+              : ListView.builder(
+                  itemCount: allCities.length,
                   itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    final routeName = data['route_name'] ?? doc.id;
-
-                    Color color;
-                    try {
-                      final hex = data['color'];
-                      color = hex != null
-                          ? _hexToColor(hex)
-                          : _defaultColors[index % _defaultColors.length];
-                    } catch (_) {
-                      color = _defaultColors[index % _defaultColors.length];
-                    }
-
-                    String start = 'Départ inconnu';
-                    String end = 'Arrivée inconnue';
-                    if (data['stops'] is List) {
-                      final stops = List<Map<String, dynamic>>.from(data['stops']);
-                      if (stops.isNotEmpty) {
-                        start = stops.first['name'] ?? start;
-                        end = stops.last['name'] ?? end;
-                      }
-                    }
-
-                    return _buildEnhancedCard(
-                      context: context,
-                      routeName: routeName,
-                      color: color,
-                      start: start,
-                      end: end,
-                      data: data,
+                    final city = allCities[index];
+                    return ListTile(
+                      title: Text(city[0].toUpperCase() + city.substring(1)),
+                      trailing: const Icon(Icons.location_city),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => BusLinesListScreen(city: city),
+                          ),
+                        );
+                      },
                     );
                   },
+                ),
+    );
+  }
+}
+
+class BusLinesListScreen extends StatefulWidget {
+  final String city;
+
+  const BusLinesListScreen({super.key, required this.city});
+
+  @override
+  State<BusLinesListScreen> createState() => _BusLinesListScreenState();
+}
+
+class _BusLinesListScreenState extends State<BusLinesListScreen> {
+  late Stream<QuerySnapshot> cityStream;
+
+  @override
+  void initState() {
+    super.initState();
+    cityStream = FirebaseFirestore.instance.collection(widget.city).snapshots();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF1E3A8A),
+          iconTheme: const IconThemeData(color: Colors.white),
+          title: Text("Lignes de ${widget.city}", style: const TextStyle(color: Colors.white)),
+        ),
+        body: StreamBuilder<QuerySnapshot>(
+          stream: cityStream,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return const Center(child: Text("Aucune ligne trouvée."));
+            }
+
+            final seenNames = <String>{};
+            final docs = snapshot.data!.docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final name = (data['route_name'] ?? doc.id).toString().trim();
+              if (seenNames.contains(name)) return false;
+              seenNames.add(name);
+              return true;
+            }).toList();
+
+            docs.sort((a, b) {
+              final dataA = a.data() as Map<String, dynamic>;
+              final dataB = b.data() as Map<String, dynamic>;
+              final routeNameA = (dataA['route_name'] ?? a.id).toString().trim();
+              final routeNameB = (dataB['route_name'] ?? b.id).toString().trim();
+
+              return _compareRouteNames(routeNameA, routeNameB);
+            });
+
+            return ListView.builder(
+              itemCount: docs.length,
+              itemBuilder: (context, index) {
+                final doc = docs[index];
+                final data = doc.data() as Map<String, dynamic>;
+                final routeName = data['route_name'] ?? doc.id;
+
+                Color color;
+                try {
+                  final hex = data['color'];
+                  color = hex != null
+                      ? _hexToColor(hex)
+                      : _defaultColors[index % _defaultColors.length];
+                } catch (_) {
+                  color = _defaultColors[index % _defaultColors.length];
+                }
+
+                String start = 'Départ inconnu';
+                String end = 'Arrivée inconnue';
+                if (data['stops'] is List) {
+                  final stops = List<Map<String, dynamic>>.from(data['stops']);
+                  if (stops.isNotEmpty) {
+                    start = stops.first['name'] ?? start;
+                    end = stops.last['name'] ?? end;
+                  }
+                }
+
+                return _buildEnhancedCard(
+                  context: context,
+                  routeName: routeName,
+                  color: color,
+                  start: start,
+                  end: end,
+                  data: data,
                 );
               },
-            ),
-    );
+            );
+          },
+        ));
   }
 
   Widget _buildEnhancedCard({
@@ -274,10 +253,11 @@ class _BusLinesScreenState extends State<BusLinesScreen> {
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: () {
-            Navigator.pushNamed(
+             Navigator.push(
               context,
-              '/line_details',
-              arguments: {...data, 'color_final': color},
+              MaterialPageRoute(
+                builder: (context) => BusLineDetailsScreen(lineData: {...data, 'color_final': color}),
+              ),
             );
           },
           child: Padding(

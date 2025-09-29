@@ -1,12 +1,13 @@
 
 import 'dart:convert';
-import 'dart:math';
+import 'package:bus_app/screens/search_firebase/route_details_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 
-// --- Data Models for Tobis API ---
+// --- Updated Data Models ---
 
 class TobisRoute {
   final int lineId;
@@ -15,6 +16,8 @@ class TobisRoute {
   final String arrivalTime;
   final int rideEtaMin;
   final List<TobisStop> stops;
+  final String? polyline;
+  final String? color;
 
   TobisRoute({
     required this.lineId,
@@ -23,22 +26,24 @@ class TobisRoute {
     required this.arrivalTime,
     required this.rideEtaMin,
     required this.stops,
+    this.polyline,
+    this.color,
   });
 
   factory TobisRoute.fromJson(Map<String, dynamic> json) {
     var stopsList = json['stops'] as List<dynamic>? ?? [];
     List<TobisStop> stops = stopsList.map((i) => TobisStop.fromJson(i)).toList();
-
-    // FIX: The true arrival time is the time of the last stop.
     String finalArrivalTime = (stops.isNotEmpty) ? stops.last.time : 'N/A';
 
     return TobisRoute(
       lineId: json['line_id'],
       routeName: json['route_name'],
       startStopArrivalTime: json['start_stop_arrival_time'] ?? 'N/A',
-      arrivalTime: finalArrivalTime, // Use the corrected arrival time
+      arrivalTime: finalArrivalTime,
       rideEtaMin: json['ride_eta_min'] ?? 0,
       stops: stops,
+      polyline: json['polyline'],
+      color: json['color'],
     );
   }
 }
@@ -48,12 +53,16 @@ class TobisStop {
   final String name;
   final int etaMinFromStart;
   final String time;
+  final double lat;
+  final double lon;
 
   TobisStop({
     required this.id,
     required this.name,
     required this.etaMinFromStart,
     required this.time,
+    required this.lat,
+    required this.lon,
   });
 
   factory TobisStop.fromJson(Map<String, dynamic> json) {
@@ -62,6 +71,8 @@ class TobisStop {
       name: json['name'],
       etaMinFromStart: json['eta_min_from_start'],
       time: json['time'],
+      lat: (json['lat'] as num?)?.toDouble() ?? 0.0,
+      lon: (json['lon'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }
@@ -83,7 +94,6 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
   Map<String, dynamic>? _destination;
 
   bool isLoading = false;
-  final int _currentIndex = 0;
   bool _hasInitialized = false;
 
   @override
@@ -195,9 +205,11 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
       }
     } catch (e) {
       setState(() => isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error searching for routes: $e")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error searching for routes: $e")),
+        );
+      }
     }
   }
   
@@ -232,13 +244,6 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
     }
   }
 
-  void _onTabTapped(int index) {
-    if (index == 1) {
-      Navigator.pushReplacementNamed(context, '/stations');
-    } else if (index == 2) {
-      Navigator.pushReplacementNamed(context, '/lines');
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -249,7 +254,7 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
         backgroundColor: Colors.white,
         elevation: 0,
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
@@ -258,20 +263,9 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
             if (isLoading)
               const Center(child: CircularProgressIndicator()),
             if (!isLoading && tobisRoutes != null)
-              Expanded(child: _buildTobisResults()),
+              _buildTobisResults(),
           ],
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: _onTabTapped,
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.route), label: 'Itinéraires'),
-          BottomNavigationBarItem(icon: Icon(Icons.location_on), label: 'Stations'),
-          BottomNavigationBarItem(icon: Icon(Icons.alt_route), label: 'Lignes'),
-        ],
       ),
     );
   }
@@ -390,6 +384,8 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
     }
 
     return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       itemCount: tobisRoutes!.length,
       itemBuilder: (context, index) {
         final route = tobisRoutes![index];
@@ -410,13 +406,18 @@ class _SearchRouteScreenV1State extends State<SearchRouteScreenV1> {
   }
 }
 
-// --- NEW WIDGET --- 
+
 class TobisRouteCard extends StatefulWidget {
   final TobisRoute route;
   final Position startPosition;
   final Map<String, dynamic> destination;
 
-  const TobisRouteCard({Key? key, required this.route, required this.startPosition, required this.destination}) : super(key: key);
+  const TobisRouteCard({
+    Key? key,
+    required this.route,
+    required this.startPosition,
+    required this.destination,
+  }) : super(key: key);
 
   @override
   _TobisRouteCardState createState() => _TobisRouteCardState();
@@ -425,16 +426,14 @@ class TobisRouteCard extends StatefulWidget {
 class _TobisRouteCardState extends State<TobisRouteCard> {
   bool _isExpanded = false;
 
-  Color _getColorForLine(String lineName) {
-    final hash = lineName.hashCode;
-    final r = (hash & 0xFF0000) >> 16;
-    final g = (hash & 0x00FF00) >> 8;
-    final b = hash & 0x0000FF;
-    return Color.fromRGBO(r, g, b, 1).withOpacity(0.8);
+  Color _hexToColor(String hex) {
+    hex = hex.replaceAll('#', '');
+    if (hex.length == 6) hex = 'FF$hex';
+    return Color(int.parse(hex, radix: 16));
   }
-
-  String _calculateDistance(){
-     final distance = Geolocator.distanceBetween(
+  
+  String _calculateDistance() {
+    final distance = Geolocator.distanceBetween(
       widget.startPosition.latitude,
       widget.startPosition.longitude,
       widget.destination['lat'],
@@ -447,105 +446,116 @@ class _TobisRouteCardState extends State<TobisRouteCard> {
     final startTimeString = widget.route.startStopArrivalTime;
     final endTimeString = widget.route.arrivalTime;
 
-    if (startTimeString == 'N/A' || endTimeString == 'N/A') {
-      return '-- min';
-    }
+    if (startTimeString == 'N/A' || endTimeString == 'N/A') return '-- min';
 
     try {
-        final startParts = startTimeString.split(':').map(int.parse).toList();
-        final endParts = endTimeString.split(':').map(int.parse).toList();
-
-        final start = DateTime(2023, 1, 1, startParts[0], startParts[1]);
-        final end = DateTime(2023, 1, 1, endParts[0], endParts[1]);
-
-        Duration diff = end.difference(start);
-        if (diff.isNegative) {
-          diff += const Duration(hours: 24); 
-        }
-        
-        return "${diff.inMinutes} min";
+      final startParts = startTimeString.split(':').map(int.parse).toList();
+      final endParts = endTimeString.split(':').map(int.parse).toList();
+      final start = DateTime(2023, 1, 1, startParts[0], startParts[1]);
+      final end = DateTime(2023, 1, 1, endParts[0], endParts[1]);
+      Duration diff = end.difference(start);
+      if (diff.isNegative) diff += const Duration(hours: 24);
+      return "${diff.inMinutes} min";
     } catch (e) {
-        return '-- min';
+      return '-- min';
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final route = widget.route;
-    final lineColor = _getColorForLine(route.routeName);
+    final lineColor = _hexToColor(route.color ?? '#FFA500');
 
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 2,
-      color: Colors.deepPurple[50],
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
+      margin: const EdgeInsets.symmetric(vertical: 8.0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 0,
+      color: const Color(0xFFF3EFFF),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => RouteDetailsScreen(route: route),
+            ),
+          );
+        },
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                Icon(Icons.directions_bus, color: Colors.deepPurple[700]),
-                const SizedBox(width: 8),
-                Text("${route.startStopArrivalTime} → ${route.arrivalTime}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(width: 8),
-                Text("(${_calculateDuration()})", style: TextStyle(fontSize: 14, color: Colors.deepPurple[800], fontWeight: FontWeight.w500)),
-                const Spacer(),
-                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.deepPurple[100],
-                    borderRadius: BorderRadius.circular(6),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.directions_bus, color: Colors.deepPurple.shade400, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${route.startStopArrivalTime} → ${route.arrivalTime}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.black87),
+                      ),
+                      const SizedBox(width: 4),
+                      Text('(${_calculateDuration()})', style: const TextStyle(fontSize: 15, color: Colors.black54)),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(_calculateDistance(), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.deepPurple.shade800)),
+                      ),
+                    ],
                   ),
-                  child: Text(_calculateDistance(), style: TextStyle(color: Colors.deepPurple[800], fontWeight: FontWeight.w500)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Icon(Icons.directions_walk, color: Colors.blue),
-                const SizedBox(width: 4), 
-                const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
-                const SizedBox(width: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: lineColor,
-                    borderRadius: BorderRadius.circular(6),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Icon(Icons.directions_walk, color: Colors.blue, size: 22),
+                      const Icon(Icons.chevron_right, color: Colors.grey, size: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: lineColor, borderRadius: BorderRadius.circular(6)),
+                        child: Text(route.routeName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                      const Icon(Icons.chevron_right, color: Colors.grey, size: 16),
+                      const Icon(Icons.location_pin, color: Colors.red, size: 22),
+                    ],
                   ),
-                  child: Text(route.routeName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                ),
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
-                const SizedBox(width: 4),
-                const Icon(Icons.location_on, color: Colors.red),
-              ],
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
+            const Divider(height: 1, indent: 12, endIndent: 12),
             InkWell(
               onTap: () => setState(() => _isExpanded = !_isExpanded),
-              child: Row(
-                children: [
-                  Icon(_isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: Colors.blue),
-                  const SizedBox(width: 4),
-                  Text(_isExpanded ? "Masquer les détails" : "Détails", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                child: Row(
+                  children: [
+                    Icon(_isExpanded ? Icons.expand_less : Icons.expand_more, color: Colors.blue.shade700, size: 20),
+                    const SizedBox(width: 4),
+                    Text(
+                      _isExpanded ? "Masquer les détails" : "Détails",
+                      style: TextStyle(color: Colors.blue.shade700, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ],
+                ),
               ),
             ),
             if (_isExpanded)
               Padding(
-                padding: const EdgeInsets.only(top: 12.0),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: Column(
-                   crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildDetailRow(Icons.directions_walk, "Marcher jusqu'à ${route.stops.first.name}"),
-                    _buildDetailRow(Icons.directions_bus, "Bus ligne ${route.routeName} vers ${widget.destination['name']}"),
+                    const SizedBox(height: 8),
+                    _buildDetailRow(Icons.directions_walk, "Walk to ${route.stops.first.name}"),
+                    _buildDetailRow(Icons.directions_bus, "Take bus line ${route.routeName}"),
                     const SizedBox(height: 8),
                     ...route.stops.map((stop) => Padding(
                       padding: const EdgeInsets.only(left: 16.0, bottom: 4.0),
-                      child: Text("• ${stop.name} à ${stop.time}", style: TextStyle(color: Colors.grey[700])),
+                      child: Text("• ${stop.name} at ${stop.time}", style: TextStyle(color: Colors.grey[700])),
                     )).toList(),
                   ],
                 ),
