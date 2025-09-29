@@ -66,13 +66,24 @@ class TobisStop {
   });
 
   factory TobisStop.fromJson(Map<String, dynamic> json) {
+    // Helper to safely parse a value that could be a num or a String
+    double _parseDouble(dynamic value) {
+      if (value is num) {
+        return value.toDouble();
+      }
+      if (value is String) {
+        return double.tryParse(value) ?? 0.0;
+      }
+      return 0.0;
+    }
+
     return TobisStop(
       id: json['id'],
       name: json['name'],
       etaMinFromStart: json['eta_min_from_start'],
       time: json['time'],
-      lat: (json['lat'] as num?)?.toDouble() ?? 0.0,
-      lon: (json['lon'] as num?)?.toDouble() ?? 0.0,
+      lat: _parseDouble(json['lat']),
+      lon: _parseDouble(json['lon']),
     );
   }
 }

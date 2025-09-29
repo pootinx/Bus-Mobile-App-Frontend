@@ -1,9 +1,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'search.dart';
+import 'search.dart'; // Assuming TobisRoute is in search.dart
 
-// Custom decode function provided by the user.
+// Custom polyline decoding function
 List<LatLng> _decodePolyline(String encoded) {
   List<LatLng> polyline = [];
   int index = 0, len = encoded.length;
@@ -52,71 +52,86 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
   @override
   void initState() {
     super.initState();
-    _setupMap();
+    _setupMapData();
   }
 
   Color _hexToColor(String hex) {
     hex = hex.replaceAll('#', '');
     if (hex.length == 6) {
-      hex = 'FF$hex';
+      hex = 'FF$hex'; // Add alpha if missing
     }
     return Color(int.parse(hex, radix: 16));
   }
 
-  void _setupMap() {
-    if (widget.route.stops.isEmpty) {
-        setState(() {
-            _initialCameraPosition = const LatLng(35.57, -5.35); // Default to Tetouan
-        });
-        return;
+  void _setupMapData() {
+    // Filter out stops that don't have valid coordinates
+    final validStops = widget.route.stops
+        .where((s) => s.lat != 0.0 && s.lon != 0.0)
+        .toList();
+
+    if (validStops.isEmpty) {
+      setState(() {
+        // Default to a central location if no stops are valid
+        _initialCameraPosition = const LatLng(35.57, -5.35); // Centered on Tetouan
+      });
+      return;
     }
 
-    List<LatLng> polylineCoordinates = [];
+    // --- 1. Create Markers for ALL valid stops ---
+    for (int i = 0; i < validStops.length; i++) {
+      final stop = validStops[i];
+      BitmapDescriptor icon;
 
+      if (i == 0) {
+        // First stop: Green marker
+        icon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
+      } else if (i == validStops.length - 1) {
+        // Last stop: Red marker
+        icon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+      } else {
+        // Intermediate stops: Orange marker
+        icon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+      }
+
+      _markers.add(Marker(
+        markerId: MarkerId(stop.id.toString()),
+        position: LatLng(stop.lat, stop.lon),
+        infoWindow: InfoWindow(title: stop.name, snippet: 'Arrêt ${i + 1}'),
+        icon: icon,
+        anchor: const Offset(0.5, 0.5), // Center the small icons
+      ));
+    }
+
+    // --- 2. Create the Polyline for the route ---
+    List<LatLng> polylineCoordinates;
+
+    // Use the detailed polyline if available
     if (widget.route.polyline != null && widget.route.polyline!.isNotEmpty) {
-      polylineCoordinates = _decodePolyline(widget.route.polyline!); // Use the custom decoder
+      polylineCoordinates = _decodePolyline(widget.route.polyline!);
+    } else {
+      // Fallback: create a line by connecting the stops
+      polylineCoordinates = validStops.map((s) => LatLng(s.lat, s.lon)).toList();
     }
 
-    if (polylineCoordinates.isEmpty) {
-        polylineCoordinates = widget.route.stops.where((s) => s.lat != 0.0 && s.lon != 0.0).map((s) => LatLng(s.lat, s.lon)).toList();
-    }
-    
-    if (polylineCoordinates.isEmpty) {
-        setState(() {
-            _initialCameraPosition = const LatLng(35.57, -5.35);
-        });
-        return;
+    if (polylineCoordinates.isNotEmpty) {
+      _polylines.add(Polyline(
+        polylineId: const PolylineId('route_line'),
+        points: polylineCoordinates,
+        color: _hexToColor(widget.route.color ?? '#FFA500'), // Use line color
+        width: 5,
+      ));
     }
 
-    _initialCameraPosition = _calculateCenter(polylineCoordinates);
+    // --- 3. Set the initial camera position ---
+    // It will be quickly updated by `_onMapCreated` to fit the bounds
+     _initialCameraPosition = _calculateCenter(polylineCoordinates);
 
-    final startStop = widget.route.stops.first;
-    final endStop = widget.route.stops.last;
 
-    _markers.add(Marker(
-      markerId: const MarkerId('start_stop'),
-      position: LatLng(startStop.lat, startStop.lon),
-      infoWindow: InfoWindow(title: startStop.name, snippet: 'Point de départ'),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-    ));
-    _markers.add(Marker(
-      markerId: const MarkerId('end_stop'),
-      position: LatLng(endStop.lat, endStop.lon),
-      infoWindow: InfoWindow(title: endStop.name, snippet: "Point d'arrivée"),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-    ));
-
-    _polylines.add(Polyline(
-      polylineId: const PolylineId('route_line'),
-      points: polylineCoordinates,
-      color: _hexToColor(widget.route.color ?? '#FFA500'),
-      width: 5,
-    ));
-
-    setState(() {});
+    setState(() {}); // Trigger a rebuild with the new markers and polylines
   }
-  
+
   LatLng _calculateCenter(List<LatLng> points) {
+    if (points.isEmpty) return const LatLng(35.57, -5.35); // Default
     double minLat = points.first.latitude, maxLat = points.first.latitude;
     double minLon = points.first.longitude, maxLon = points.first.longitude;
 
@@ -126,17 +141,19 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
       if (point.longitude < minLon) minLon = point.longitude;
       if (point.longitude > maxLon) maxLon = point.longitude;
     }
-
     return LatLng((minLat + maxLat) / 2, (minLon + maxLon) / 2);
   }
-
-
+  
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
+    // Animate camera to fit the entire route
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (mounted && _mapController != null && _polylines.isNotEmpty && _polylines.first.points.isNotEmpty) {
-        LatLngBounds bounds = _getBounds(_polylines.first.points);
-        _mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60.0));
+      if (mounted && _mapController != null && _polylines.isNotEmpty) {
+        final points = _polylines.first.points;
+        if (points.isNotEmpty) {
+          final bounds = _getBounds(points);
+          _mapController?.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60.0)); // 60px padding
+        }
       }
     });
   }
@@ -171,17 +188,20 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
           SizedBox(
             height: MediaQuery.of(context).size.height * 0.4,
             child: _initialCameraPosition == null
-                ? const Center(child: Text('Loading map...'))
+                ? const Center(child: CircularProgressIndicator())
                 : GoogleMap(
                     onMapCreated: _onMapCreated,
                     initialCameraPosition: CameraPosition(target: _initialCameraPosition!, zoom: 12),
                     polylines: _polylines,
                     markers: _markers,
+                    myLocationButtonEnabled: false,
                     mapToolbarEnabled: false,
                   ),
           ),
+          // Header below map
           Container(
             padding: const EdgeInsets.all(16),
+            width: double.infinity,
             color: routeColor,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -206,6 +226,7 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
               ],
             ),
           ),
+          // Scrollable list of stops
           Expanded(
             child: ListView.builder(
               padding: EdgeInsets.zero,
@@ -214,8 +235,8 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
                 final stop = widget.route.stops[index];
                 return ListTile(
                   leading: _buildStopIndicator(index, widget.route.stops.length, routeColor),
-                  title: Text(stop.name),
-                  subtitle: Text(index == 0 ? 'Point de départ' : stop.time, style: TextStyle(color: Colors.grey.shade600)),
+                  title: Text(stop.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(stop.time, style: TextStyle(color: Colors.grey.shade600)),
                 );
               },
             ),
@@ -225,6 +246,7 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
     );
   }
 
+  // Helper to build the visual indicator for the stop list
   Widget _buildStopIndicator(int index, int stopCount, Color color) {
     return SizedBox(
       width: 40,
@@ -233,10 +255,7 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
         children: [
           if (index > 0)
             Expanded(
-              child: Container(
-                width: 2,
-                color: color.withOpacity(0.3),
-              ),
+              child: Container(width: 2, color: color.withOpacity(0.3)),
             ),
           Container(
             padding: const EdgeInsets.all(4),
@@ -246,17 +265,14 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
               shape: BoxShape.circle,
             ),
             child: index == 0
-                ? Icon(Icons.play_arrow_rounded, color: color, size: 14)
-                : index == stopCount - 1 
-                  ? Icon(Icons.location_on, color: color, size: 14)
-                  : CircleAvatar(radius: 4, backgroundColor: color.withOpacity(0.5)),
+                ? Icon(Icons.play_arrow, color: color, size: 14)
+                : index == stopCount - 1
+                    ? Icon(Icons.location_on, color: color, size: 14)
+                    : CircleAvatar(radius: 4, backgroundColor: color.withOpacity(0.5)),
           ),
           if (index < stopCount - 1)
             Expanded(
-              child: Container(
-                width: 2,
-                color: color.withOpacity(0.3),
-              ),
+              child: Container(width: 2, color: color.withOpacity(0.3)),
             ),
         ],
       ),
