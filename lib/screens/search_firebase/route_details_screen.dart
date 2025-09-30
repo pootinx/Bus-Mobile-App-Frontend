@@ -3,62 +3,22 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
-import 'search.dart'; 
+import 'search.dart';
 
-class LineDetails {
-  final String routeName;
-  final String? color;
-  final String? polyline;
-  final List<LineStop> stops;
-
-  LineDetails({
-    required this.routeName,
-    this.color,
-    this.polyline,
-    required this.stops,
-  });
-
-  factory LineDetails.fromJson(Map<String, dynamic> json) {
-    var stopsList = json['stops'] as List<dynamic>? ?? [];
-    List<LineStop> stops = stopsList.map((i) => LineStop.fromJson(i)).toList();
-    
-    return LineDetails(
-      routeName: json['route_name'] ?? 'Unnamed Route',
-      color: json['color'],
-      polyline: json['polyline'],
-      stops: stops,
-    );
-  }
-}
-
-class LineStop {
+class Stop {
   final int id;
   final String name;
   final double lat;
   final double lon;
-  final String time;
 
-  LineStop({
-    required this.id,
-    required this.name,
-    required this.lat,
-    required this.lon,
-    required this.time,
-  });
+  Stop({required this.id, required this.name, required this.lat, required this.lon});
 
-  factory LineStop.fromJson(Map<String, dynamic> json) {
-    double parseCoordinate(dynamic value) {
-      if (value is num) return value.toDouble();
-      if (value is String) return double.tryParse(value) ?? 0.0;
-      return 0.0;
-    }
-
-    return LineStop(
+  factory Stop.fromJson(Map<String, dynamic> json) {
+    return Stop(
       id: json['id'],
-      name: json['name'],
-      lat: parseCoordinate(json['lat']),
-      lon: parseCoordinate(json['lon']),
-      time: json['time'] ?? '--:--',
+      name: json['name'] ?? 'Unnamed Stop',
+      lat: (json['lat'] as num?)?.toDouble() ?? 0.0,
+      lon: (json['lon'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }
@@ -73,38 +33,33 @@ class RouteDetailsScreen extends StatefulWidget {
 }
 
 class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
-  Future<LineDetails>? _detailsFuture;
+  Future<List<Stop>>? _stopsFuture;
 
   @override
   void initState() {
     super.initState();
-    _detailsFuture = _fetchLineDetails();
+    _stopsFuture = _fetchStopsForLine(widget.route.lineId);
   }
 
-  Future<LineDetails> _fetchLineDetails() async {
-    final lineId = widget.route.lineId;
-    final url = 'https://tobis-backend.onrender.com/itinerary/routes/$lineId';
-    
+  Future<List<Stop>> _fetchStopsForLine(int lineId) async {
+    final url = 'https://tobis-backend.onrender.com/station/stops?line_id=$lineId';
     try {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data is Map<String, dynamic>) {
-            if (data.containsKey('line')) {
-                return LineDetails.fromJson(data['line']);
-            } else if (data.containsKey('route')) {
-                return LineDetails.fromJson(data['route']);
-            } else {
-                return LineDetails.fromJson(data);
-            }
-        }
-         throw Exception('API response format is not a valid map.');
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((stopJson) => Stop.fromJson(stopJson)).toList();
       } else {
-        throw Exception('Failed to load line details: HTTP ${response.statusCode}');
+        throw Exception('Failed to load stops: HTTP ${response.statusCode}');
       }
     } catch (e) {
-      throw Exception('Error fetching line details: $e');
+      throw Exception('Error fetching stops: $e');
     }
+  }
+
+  Color _hexToColor(String hex) {
+    hex = hex.replaceAll('#', '');
+    if (hex.length == 6) hex = 'FF$hex';
+    return Color(int.parse(hex, radix: 16));
   }
 
   @override
@@ -117,8 +72,8 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
         backgroundColor: routeColor,
         foregroundColor: Colors.white,
       ),
-      body: FutureBuilder<LineDetails>(
-        future: _detailsFuture,
+      body: FutureBuilder<List<Stop>>(
+        future: _stopsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -128,41 +83,37 @@ class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Text(
-                  'Failed to load route map:\n${snapshot.error}',
+                  'Failed to load route details:\n${snapshot.error}',
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: Colors.red, fontSize: 16),
                 ),
               ),
             );
           }
-          if (!snapshot.hasData) {
-            return const Center(child: Text('No route data found.'));
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text('No stops found for this line.'));
           }
           
-          final lineDetails = snapshot.data!;
+          final allStops = snapshot.data!;
           
           return RouteDetailsView(
-            key: ValueKey(lineDetails.routeName), 
-            details: lineDetails,
+            key: ValueKey(widget.route.lineId), 
+            route: widget.route, 
+            stops: allStops,
             color: routeColor,
           );
         },
       ),
     );
   }
-
-  Color _hexToColor(String hex) {
-    hex = hex.replaceAll('#', '');
-    if (hex.length == 6) hex = 'FF$hex';
-    return Color(int.parse(hex, radix: 16));
-  }
 }
 
 class RouteDetailsView extends StatefulWidget {
-  final LineDetails details;
+  final TobisRoute route;
+  final List<Stop> stops;
   final Color color;
 
-  const RouteDetailsView({Key? key, required this.details, required this.color}) : super(key: key);
+  const RouteDetailsView({Key? key, required this.route, required this.stops, required this.color}) : super(key: key);
 
   @override
   _RouteDetailsViewState createState() => _RouteDetailsViewState();
@@ -177,22 +128,7 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
   @override
   void initState() {
     super.initState();
-    // --- IMPLEMENTING THE SUGGESTED QUICK FIX ---
-    final validStops = widget.details.stops.where((s) => s.lat != 0.0 && s.lon != 0.0).toList();
-    if (validStops.isEmpty) {
-        _initialCameraPosition = const LatLng(33.57, -7.59); // Default Casablanca
-    } else {
-        _initialCameraPosition = _calculateCenter(validStops.map((s) => LatLng(s.lat, s.lon)).toList());
-    }
     _setupMapData();
-
-    // --- ADDING DEBUG PRINTS ---
-    print('--- MAP DEBUG INFO ---');
-    print('Initial camera position: $_initialCameraPosition');
-    print('Polylines count: ${_polylines.length}');
-    if(_polylines.isNotEmpty) print('Polyline points: ${_polylines.first.points.length}');
-    print('Markers count: ${_markers.length}');
-    print('----------------------');
   }
   
   List<LatLng> _decodePolyline(String encoded) {
@@ -221,38 +157,40 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
   }
 
   void _setupMapData() {
-    final validStops = widget.details.stops.where((s) => s.lat != 0.0 && s.lon != 0.0).toList();
-    if (validStops.isEmpty) return;
+    if (widget.route.polyline != null && widget.route.polyline!.isNotEmpty) {
+        final polylineCoordinates = _decodePolyline(widget.route.polyline!);
+        if (polylineCoordinates.isNotEmpty) {
+            _polylines.add(Polyline(
+                polylineId: const PolylineId('route_line'),
+                points: polylineCoordinates,
+                color: widget.color,
+                width: 5,
+            ));
+            _initialCameraPosition = _calculateCenter(polylineCoordinates);
+        }
+    }
 
-    for (int i = 0; i < validStops.length; i++) {
-      final stop = validStops[i];
+    for (int i = 0; i < widget.stops.length; i++) {
+      final stop = widget.stops[i];
       _markers.add(Marker(
-        markerId: MarkerId('${stop.id}_$i'), // Ensure unique marker IDs
+        markerId: MarkerId(stop.id.toString()),
         position: LatLng(stop.lat, stop.lon),
-        infoWindow: InfoWindow(title: stop.name, snippet: 'Stop ${i+1}'),
-        icon: (i == 0) 
+        infoWindow: InfoWindow(title: stop.name),
+        icon: (i == 0)
             ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)
-            : (i == validStops.length - 1) 
+            : (i == widget.stops.length - 1)
               ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)
               : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
       ));
     }
 
-    List<LatLng> polylineCoordinates;
-    if (widget.details.polyline != null && widget.details.polyline!.isNotEmpty) {
-      polylineCoordinates = _decodePolyline(widget.details.polyline!);
-    } else {
-      polylineCoordinates = validStops.map((s) => LatLng(s.lat, s.lon)).toList();
+    if (_initialCameraPosition == null && _markers.isNotEmpty) {
+        _initialCameraPosition = _calculateCenter(_markers.map((m) => m.position).toList());
+    } else if (_initialCameraPosition == null) {
+        _initialCameraPosition = const LatLng(33.57, -7.59);
     }
 
-    if (polylineCoordinates.isNotEmpty) {
-      _polylines.add(Polyline(
-        polylineId: const PolylineId('route_line'),
-        points: polylineCoordinates,
-        color: widget.color,
-        width: 5,
-      ));
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _zoomToFitRoute());
   }
 
   void _onMapCreated(GoogleMapController controller) {
@@ -262,28 +200,23 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
 
   void _zoomToFitRoute() {
     if (_mapController == null) return;
-    
     final points = _polylines.isNotEmpty ? _polylines.first.points : _markers.map((m) => m.position).toList();
-
     if (points.length > 1) {
-      final bounds = _getBounds(points);
-      _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80.0));
-    } else if (points.length == 1) {
-       _mapController!.animateCamera(CameraUpdate.newLatLngZoom(points.first, 15));
+      _mapController!.animateCamera(CameraUpdate.newLatLngBounds(_getBounds(points), 60.0));
     }
   }
   
   LatLng _calculateCenter(List<LatLng> points) {
-    if (points.isEmpty) return const LatLng(33.57, -7.59);
-    double minLat = points.first.latitude, maxLat = points.first.latitude;
-    double minLon = points.first.longitude, maxLon = points.first.longitude;
-    for (final point in points) {
-        minLat = (point.latitude < minLat) ? point.latitude : minLat;
-        maxLat = (point.latitude > maxLat) ? point.latitude : maxLat;
-        minLon = (point.longitude < minLon) ? point.longitude : minLon;
-        maxLon = (point.longitude > maxLon) ? point.longitude : maxLon;
-    }
-    return LatLng((minLat + maxLat) / 2, (minLon + maxLon) / 2);
+      if(points.isEmpty) return const LatLng(33.57, -7.59);
+      double minLat = points.first.latitude, maxLat = points.first.latitude;
+      double minLon = points.first.longitude, maxLon = points.first.longitude;
+      for (final point in points) {
+          minLat = (point.latitude < minLat) ? point.latitude : minLat;
+          maxLat = (point.latitude > maxLat) ? point.latitude : maxLat;
+          minLon = (point.longitude < minLon) ? point.longitude : minLon;
+          maxLon = (point.longitude > maxLon) ? point.longitude : maxLon;
+      }
+      return LatLng((minLat + maxLat) / 2, (minLon + maxLon) / 2);
   }
 
   LatLngBounds _getBounds(List<LatLng> points) {
@@ -295,55 +228,49 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
 
   @override
   Widget build(BuildContext context) {
+    final stops = widget.stops;
+
     return Column(
       children: [
         SizedBox(
           height: MediaQuery.of(context).size.height * 0.4,
-          child: (_initialCameraPosition == null)
-              ? const Center(child: Text('Calculating route...'))
-              : GoogleMap(
+          child: GoogleMap(
                   onMapCreated: _onMapCreated,
                   initialCameraPosition: CameraPosition(target: _initialCameraPosition!, zoom: 12),
                   polylines: _polylines,
                   markers: _markers,
                   mapToolbarEnabled: false,
-                  onCameraIdle: () => _zoomToFitRoute(), // Recenter map when user moves it
                 ),
         ),
         Container(
           padding: const EdgeInsets.all(16),
+          width: double.infinity,
           color: widget.color,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                (widget.details.stops.isNotEmpty)
-                    ? '${widget.details.stops.first.name} → ${widget.details.stops.last.name}'
+                (stops.isNotEmpty)
+                    ? '${stops.first.name} → ${stops.last.name}'
                     : 'No stops found',
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(Icons.alt_route, color: Colors.white, size: 16),
-                  const SizedBox(width: 8),
-                  Text('${widget.details.stops.length} arrêts', style: const TextStyle(color: Colors.white)),
-                ],
-              ),
+              Text('${stops.length} stops', style: const TextStyle(color: Colors.white, fontSize: 15)),
             ],
           ),
         ),
         Expanded(
           child: ListView.builder(
             padding: EdgeInsets.zero,
-            itemCount: widget.details.stops.length,
+            itemCount: stops.length,
             itemBuilder: (context, index) {
-              final stop = widget.details.stops[index];
+              final stop = stops[index];
               return ListTile(
-                leading: _buildStopIndicator(index, widget.details.stops.length, widget.color),
+                leading: _buildStopIndicator(index, stops.length, widget.color),
                 title: Text(stop.name),
-                subtitle: Text(index == 0 ? 'Point de départ' : stop.time, style: TextStyle(color: Colors.grey.shade600)),
+                subtitle: Text('Stop ${index + 1}', style: TextStyle(color: Colors.grey.shade600)),
               );
             },
           ),
