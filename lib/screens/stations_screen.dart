@@ -4,11 +4,10 @@ import 'dart:math' as math;
 import 'package:bus_app/screens/bus_line_details_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 
 class StationsScreen extends StatefulWidget {
   const StationsScreen({super.key});
@@ -18,13 +17,14 @@ class StationsScreen extends StatefulWidget {
 }
 
 class _StationsScreenState extends State<StationsScreen> with TickerProviderStateMixin {
+  GoogleMapController? _mapController;
   LatLng? userLocation;
-  Marker? _userMarker;
-  StreamSubscription<Position>? _positionStream;
+  
+  final Set<Marker> _markers = {};
+  final Set<Polyline> _polylines = {};
 
   Map<String, Map<String, dynamic>> stopsMap = {};
   Map<String, dynamic>? selectedStop;
-  final MapController _mapController = MapController();
   final Map<String, List<LatLng>> _lineTrajectories = {};
   final Set<String> _displayedLines = {};
   late List<String> moroccoCities = [];
@@ -41,72 +41,45 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
 
   @override
   void dispose() {
-    _positionStream?.cancel();
+    _mapController?.dispose();
     super.dispose();
   }
 
+  void _onMapCreated(GoogleMapController controller) {
+    _mapController = controller;
+  }
+
   void _startLocationTrackingAndAutoSearch() async {
-  LocationPermission permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.denied) {
-    permission = await Geolocator.requestPermission();
-  }
-
-  if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
-    setState(() => locationPermissionDenied = true);
-    return;
-  }
-
-  final position = await Geolocator.getCurrentPosition(
-    desiredAccuracy: LocationAccuracy.high,
-  );
-
-  final latLng = LatLng(position.latitude, position.longitude);
-  setState(() {
-    userLocation = latLng;
-    _userMarker = Marker(
-      point: latLng,
-      width: 40,
-      height: 40,
-      child: const Icon(Icons.person_pin_circle, color: Colors.blue, size: 40),
-    );
-  });
-
-  try {
-    final placemarks = await placemarkFromCoordinates(
-      position.latitude,
-      position.longitude,
-    );
-
-    if (placemarks.isNotEmpty) {
-      final city = placemarks.first.locality?.toLowerCase().trim();
-      if (city != null && city.isNotEmpty) {
-        print("📍 Current city: $city");
-        _mapController.move(latLng, 14);
-        _fetchStopsFromLines(city);
-      }
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
     }
-  } catch (e) {
-    print('❌ Reverse geocoding failed: $e');
-  }
-}
 
+    if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
+      setState(() => locationPermissionDenied = true);
+      return;
+    }
 
-  void fetchAndPrintCities() async {
-    moroccoCities = await getFirestoreCities();
-    print('✅ Liste des villes depuis Firestore: $moroccoCities');
-  }
-
-  Future<List<String>> getFirestoreCities() async {
     try {
-      final snapshot = await FirebaseFirestore.instance.collection('cities').get();
-      return snapshot.docs
-          .map((doc) => doc.data()['name']?.toString().toLowerCase().trim())
-          .where((name) => name != null && name.isNotEmpty)
-          .cast<String>()
-          .toList();
+      final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      final latLng = LatLng(position.latitude, position.longitude);
+
+      setState(() {
+        userLocation = latLng;
+        _updateMarkers(); // Add user marker
+      });
+
+      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(latLng, 14));
+
+      final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      if (placemarks.isNotEmpty) {
+        final city = placemarks.first.locality?.toLowerCase().trim();
+        if (city != null && city.isNotEmpty) {
+          _fetchStopsFromLines(city);
+        }
+      }
     } catch (e) {
-      debugPrint('Error fetching cities: $e');
-      return [];
+      print('❌ Location or Geocoding failed: $e');
     }
   }
 
@@ -116,12 +89,13 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
 
     try {
       final bestCity = await _findClosestValidCityCollection(query);
-
       if (bestCity == null) {
         setState(() => loadingStops = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Aucune ville correspondante trouvée.')),
-        );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Aucune ville correspondante trouvée.')),
+          );
+        }
         return;
       }
 
@@ -133,9 +107,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
         final lineData = lineDoc.data();
         final encodedPolyline = lineData['polyline'];
         if (encodedPolyline == null) continue;
-
-        final lineName = lineData['route_name'] ?? lineData['name'] ?? lineId;
-        final lineColor = lineData['color'] ?? '#000000';
 
         _lineTrajectories.putIfAbsent(
           lineId,
@@ -151,11 +122,11 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
 
           final key = '$name-$lat-$lon';
           final lineDetails = {
-            'line_id': lineId,
-            'route_name': lineName,
-            'color': lineColor,
-            'color_final': _hexToColor(lineColor),
-            'polyline_points': _lineTrajectories[lineId],
+            'line_id': lineDoc.id,
+            'route_name': lineData['route_name'] ?? 'Ligne Inconnue',
+            'color': lineData['color'] ?? '#0000FF',
+            'polyline': encodedPolyline, 
+            'stops': lineData['stops'],
           };
 
           if (tempStops.containsKey(key)) {
@@ -172,12 +143,10 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
       }
 
       final userPos = userLocation!;
-      final distance = const Distance();
-
       final sortedStops = tempStops.values.toList()
         ..sort((a, b) {
-          final d1 = distance(userPos, LatLng(a['lat'], a['lon']));
-          final d2 = distance(userPos, LatLng(b['lat'], b['lon']));
+          final d1 = Geolocator.distanceBetween(userPos.latitude, userPos.longitude, a['lat'], a['lon']);
+          final d2 = Geolocator.distanceBetween(userPos.latitude, userPos.longitude, b['lat'], b['lon']);
           return d1.compareTo(d2);
         });
 
@@ -191,93 +160,91 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
       setState(() {
         stopsMap = filteredStops;
         loadingStops = false;
+        _updateMarkers();
+        _updatePolylines();
       });
 
-
-      if (tempStops.isEmpty && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Aucun arrêt trouvé pour cette ville.')),
-        );
-      }
     } catch (e) {
       setState(() => loadingStops = false);
       debugPrint('Firestore error: $e');
     }
   }
 
+  void _updateMarkers() {
+    _markers.clear();
 
-  Future<String?> _findClosestValidCityCollection(String query) async {
-    final input = query.toLowerCase().trim();
-    moroccoCities.sort((a, b) =>
-        _levenshteinDistance(input, a).compareTo(_levenshteinDistance(input, b)));
-
-    for (final city in moroccoCities) {
-      final snapshot = await FirebaseFirestore.instance.collection(city).limit(1).get();
-      if (snapshot.docs.isNotEmpty) return city;
+    // Add user location marker
+    if (userLocation != null) {
+      _markers.add(Marker(
+        markerId: const MarkerId('user_location'),
+        position: userLocation!,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        infoWindow: const InfoWindow(title: 'Ma Position'),
+      ));
     }
 
-    return null;
+    // Add stop markers
+    for (final stop in stopsMap.values) {
+       final lat = stop['lat'];
+       final lon = stop['lon'];
+       final name = stop['name'];
+       final markerId = MarkerId('stop_$name-$lat-$lon');
+
+       final bool isSelected = selectedStop != null && selectedStop!['name'] == name && selectedStop!['lat'] == lat;
+
+       _markers.add(Marker(
+         markerId: markerId,
+         position: LatLng(lat, lon),
+         infoWindow: InfoWindow(title: name),
+         icon: BitmapDescriptor.defaultMarkerWithHue( isSelected ? BitmapDescriptor.hueViolet : BitmapDescriptor.hueOrange),
+         onTap: () => _selectStop(stop),
+         zIndex: isSelected ? 2 : 1,
+       ));
+    }
+    
+    // Trajectory endpoints
+     for (final id in _displayedLines) {
+      final traj = _lineTrajectories[id] ?? [];
+      if (traj.isEmpty) continue;
+      _markers.add(Marker(markerId: MarkerId('start_$id'), position: traj.first, icon: _createEndpointIcon(_getLineColor(id), Icons.play_arrow)));
+      _markers.add(Marker(markerId: MarkerId('end_$id'), position: traj.last, icon: _createEndpointIcon(_getLineColor(id), Icons.stop)));
+    }
   }
 
-  int _levenshteinDistance(String s, String t) {
-    if (s == t) return 0;
-    if (s.isEmpty) return t.length;
-    if (t.isEmpty) return s.length;
-
-    List<List<int>> dp = List.generate(s.length + 1, (_) => List.filled(t.length + 1, 0));
-    for (int i = 0; i <= s.length; i++) {
-      dp[i][0] = i;
-    }
-    for (int j = 0; j <= t.length; j++) {
-      dp[0][j] = j;
-    }
-
-    for (int i = 1; i <= s.length; i++) {
-      for (int j = 1; j <= t.length; j++) {
-        final cost = s[i - 1] == t[j - 1] ? 0 : 1;
-        dp[i][j] = [
-          dp[i - 1][j] + 1,
-          dp[i][j - 1] + 1,
-          dp[i - 1][j - 1] + cost,
-        ].reduce(math.min);
+  void _updatePolylines() {
+    _polylines.clear();
+    for (final lineId in _displayedLines) {
+      if (_lineTrajectories.containsKey(lineId)) {
+        _polylines.add(Polyline(
+          polylineId: PolylineId(lineId),
+          points: _lineTrajectories[lineId]!,
+          color: _getLineColor(lineId),
+          width: 5,
+        ));
       }
     }
-
-    return dp[s.length][t.length];
   }
 
+  // Helper functions (mostly unchanged, but adapted for Google Maps LatLng)
+
   List<LatLng> _decodePolyline(String encoded) {
-    List<LatLng> polyline = [];
+    List<LatLng> points = [];
     int index = 0, len = encoded.length;
     int lat = 0, lng = 0;
-
     while (index < len) {
       int b, shift = 0, result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lng += dlng;
-
-      polyline.add(LatLng(lat / 1E5, lng / 1E5));
+      do { b = encoded.codeUnitAt(index++) - 63; result |= (b & 0x1F) << shift; shift += 5; } while (b >= 0x20);
+      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1)); lat += dlat;
+      shift = 0; result = 0;
+      do { b = encoded.codeUnitAt(index++) - 63; result |= (b & 0x1F) << shift; shift += 5; } while (b >= 0x20);
+      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1)); lng += dlng;
+      points.add(LatLng(lat / 1e5, lng / 1e5));
     }
-    return polyline;
+    return points;
   }
 
   List<LatLng> _smoothTrajectory(List<LatLng> trajectory) {
-    if (trajectory.length < 3) return trajectory;
+     if (trajectory.length < 3) return trajectory;
     final smoothed = <LatLng>[trajectory.first];
     for (var i = 1; i < trajectory.length - 1; i++) {
       final prev = trajectory[i - 1];
@@ -301,65 +268,164 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
   Color _getLineColor(String lineId) {
     for (final stop in stopsMap.values) {
       for (final l in stop['lines']) {
-        if (l['line_id'] == lineId) return l['color_final'];
+        if (l['line_id'] == lineId) return _hexToColor(l['color']);
       }
     }
     final rand = math.Random(lineId.hashCode);
     return Color.fromARGB(255, 100 + rand.nextInt(155), 100 + rand.nextInt(155), 100 + rand.nextInt(155));
   }
 
-  void _toggleLineTrajectory(String lineId) => setState(() {
-        _displayedLines.contains(lineId)
-            ? _displayedLines.remove(lineId)
-            : _displayedLines.add(lineId);
+  void _toggleLineTrajectory(String lineId) {
+    setState(() {
+      if (_displayedLines.contains(lineId)) {
+        _displayedLines.remove(lineId);
+      } else {
+        _displayedLines.add(lineId);
+      }
+      _updateMarkers();
+      _updatePolylines();
+    });
+  }
+
+  void _selectStop(Map<String, dynamic> stop) {
+    setState(() {
+      selectedStop = stop;
+      _updateMarkers();
+    });
+
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLng(LatLng(stop['lat'], stop['lon'])),
+    );
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final lines = stop['lines'] as List<dynamic>;
+        final ids = <String>{};
+        final uniqueLines = lines.where((l) => ids.add(l['line_id'].toString())).toList();
+
+        return DraggableScrollableSheet(
+          initialChildSize: 0.4,
+          minChildSize: 0.2,
+          maxChildSize: 0.6,
+          expand: false,
+          builder: (_, scrollController) {
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(stop['name'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    controller: scrollController,
+                    itemCount: uniqueLines.length,
+                    itemBuilder: (context, index) {
+                      final line = uniqueLines[index];
+                      final lineId = line['line_id'];
+                      return ListTile(
+                        leading: Icon(Icons.directions_bus, color: _hexToColor(line['color'])),
+                        title: Text(line['route_name'] ?? 'Ligne $lineId'),
+                        trailing: IconButton(
+                          icon: Icon(_displayedLines.contains(lineId) ? Icons.visibility_off : Icons.visibility),
+                          onPressed: () {
+                            _toggleLineTrajectory(lineId);
+                            Navigator.pop(ctx); 
+                          },
+                        ),
+                        onTap: () {
+                           Navigator.pop(ctx);
+                           Navigator.push(
+                             context,
+                             MaterialPageRoute(builder: (_) => BusLineDetailsScreen(lineData: Map<String, dynamic>.from(line),),)
+                           );
+                        },
+                      );
+                    },
+                  ),
+                )
+              ],
+            );
+          },
+        );
+      },
+    ).whenComplete(() {
+      setState(() {
+        selectedStop = null;
+        _updateMarkers();
       });
-
-  Widget _buildMapControls() => Positioned(
-        bottom: 20,
-        right: 20,
-        child: Column(children: [
-          FloatingActionButton.small(heroTag: 'zoom_in', child: const Icon(Icons.add), onPressed: () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1)),
-          const SizedBox(height: 8),
-          FloatingActionButton.small(heroTag: 'zoom_out', child: const Icon(Icons.remove), onPressed: () => _mapController.move(_mapController.camera.center, _mapController.camera.zoom - 1)),
-        ]),
-      );
-
-  String _calculateTrajectoryDistance(List<LatLng> pts) {
-    if (pts.length < 2) return '0 m';
-    var dist = 0.0;
-    for (var i = 0; i < pts.length - 1; i++) {
-      dist += const Distance().as(LengthUnit.Meter, pts[i], pts[i + 1]);
+    });
+  }
+  
+  // Stubs for functions that are not directly convertible or need more context
+  Future<void> fetchAndPrintCities() async { 
+     moroccoCities = await getFirestoreCities();
+  }
+  
+  Future<List<String>> getFirestoreCities() async {
+     try {
+      final snapshot = await FirebaseFirestore.instance.collection('cities').get();
+      return snapshot.docs
+          .map((doc) => doc.data()['name']?.toString().toLowerCase().trim())
+          .where((name) => name != null && name.isNotEmpty)
+          .cast<String>()
+          .toList();
+    } catch (e) {
+      debugPrint('Error fetching cities: $e');
+      return [];
     }
-    return dist < 1000 ? '${dist.toStringAsFixed(0)} m' : '${(dist / 1000).toStringAsFixed(1)} km';
   }
 
-  MarkerLayer _buildTrajectoryMarkers() {
-    final markers = <Marker>[];
-    for (final id in _displayedLines) {
-      final traj = _lineTrajectories[id] ?? [];
-      if (traj.isEmpty) continue;
-      markers.addAll([
-        Marker(width: 24, height: 24, point: traj.first, child: _endpoint(_getLineColor(id), Icons.play_arrow)),
-        Marker(width: 24, height: 24, point: traj.last, child: _endpoint(_getLineColor(id), Icons.stop)),
-      ]);
+  Future<String?> _findClosestValidCityCollection(String query) async {
+    final input = query.toLowerCase().trim();
+    moroccoCities.sort((a, b) =>
+        _levenshteinDistance(input, a).compareTo(_levenshteinDistance(input, b)));
+
+    for (final city in moroccoCities) {
+      try {
+        final snapshot = await FirebaseFirestore.instance.collection(city).limit(1).get();
+        if (snapshot.docs.isNotEmpty) return city;
+      } catch (e) {
+        // collection might not exist, continue
+      }
     }
-    return MarkerLayer(markers: markers);
+    return null;
   }
 
-  Widget _endpoint(Color c, IconData ic) => Container(
-        decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-        child: Icon(ic, color: Colors.white, size: 12),
-      );
+  int _levenshteinDistance(String s, String t) {
+    if (s == t) return 0;
+    if (s.isEmpty) return t.length;
+    if (t.isEmpty) return s.length;
 
-  List<Polyline> _buildPolylineLayers() => _displayedLines
-      .where((id) => _lineTrajectories[id]?.isNotEmpty ?? false)
-      .map((id) => Polyline(points: _lineTrajectories[id]!, strokeWidth: 4, color: _getLineColor(id)))
-      .toList();
+    List<int> v0 = List<int>.filled(t.length + 1, 0);
+    List<int> v1 = List<int>.filled(t.length + 1, 0);
+
+    for (int i = 0; i < t.length + 1; i < i++) v0[i] = i;
+
+    for (int i = 0; i < s.length; i++) {
+        v1[0] = i + 1;
+        for (int j = 0; j < t.length; j++) {
+            int cost = (s[i] == t[j]) ? 0 : 1;
+            v1[j + 1] = math.min(v1[j] + 1, math.min(v0[j + 1] + 1, v0[j] + cost));
+        }
+        for (int j = 0; j < t.length + 1; j++) {
+            v0[j] = v1[j];
+        }
+    }
+    return v1[t.length];
+  }
+  
+  BitmapDescriptor _createEndpointIcon(Color c, IconData ic) {
+      // This is a placeholder. For a true custom icon from a widget, you'd need a more complex function
+      // that can convert a widget to a BitmapDescriptor. For now, we'll use hue.
+      if (ic == Icons.play_arrow) return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
+      if (ic == Icons.stop) return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+      return BitmapDescriptor.defaultMarker;
+  }
 
   @override
-Widget build(BuildContext context) {
-    final stops = stopsMap.values.toList();
-
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E3A8A),
@@ -368,138 +434,46 @@ Widget build(BuildContext context) {
       ),
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: userLocation ?? const LatLng(35.5667, -5.3667),
-              initialZoom: 13,
+          GoogleMap(
+            onMapCreated: _onMapCreated,
+            initialCameraPosition: CameraPosition(
+              target: userLocation ?? const LatLng(34.020882, -6.84165), // Default to Rabat
+              zoom: 13,
             ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-                subdomains: ['a', 'b', 'c', 'd'],
-              ),
-              if (_userMarker != null) MarkerLayer(markers: [_userMarker!]),
-              MarkerLayer(
-                markers: stops.map((s) {
-                  final sel = selectedStop != null &&
-                      s['name'] == selectedStop!['name'] &&
-                      s['lat'] == selectedStop!['lat'] &&
-                      s['lon'] == selectedStop!['lon'];
-                  return Marker(
-                    point: LatLng(s['lat'], s['lon']),
-                    width: sel ? 40 : 30,
-                    height: sel ? 40 : 30,
-                    child: GestureDetector(
-                      onTap: () => _selectStop(s),
-                      child: SvgPicture.asset('assets/icons/bus.svg', colorFilter: const ColorFilter.mode(Colors.blue, BlendMode.srcIn)),
-                    ),
-                  );
-                }).toList(),
-              ),
-              PolylineLayer(
-                polylines: _displayedLines
-                    .where((id) => _lineTrajectories[id]?.isNotEmpty ?? false)
-                    .map((id) => Polyline(points: _lineTrajectories[id]!, strokeWidth: 4, color: _getLineColor(id)))
-                    .toList(),
-              )
-            ],
+            markers: _markers,
+            polylines: _polylines,
+            myLocationButtonEnabled: true,
+            myLocationEnabled: false, // Using custom marker
+            zoomControlsEnabled: true,
           ),
           if (loadingStops)
             const Positioned(
               top: 10,
-              right: 10,
-              child: Card(color: Colors.white70, child: Padding(padding: EdgeInsets.all(6), child: Text('Chargement des arrêts…'))),
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Card(
+                  color: Colors.white,
+                  child: Padding(
+                    padding: EdgeInsets.all(8.0),
+                    child: Text('Chargement des arrêts…'),
+                  ),
+                ),
+              ),
             ),
           if (locationPermissionDenied)
-            Positioned(
-              top: 60,
+             Positioned(
+              top: 10,
               left: 12,
               right: 12,
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(color: Colors.red[100], borderRadius: BorderRadius.circular(10)),
-                child: const Text('Géolocalisation refusée. Entrez votre emplacement manuellement.', style: TextStyle(color: Colors.red), textAlign: TextAlign.center),
+                child: const Text('Géolocalisation refusée. La position par défaut est affichée.', style: TextStyle(color: Colors.red), textAlign: TextAlign.center),
               ),
             ),
-          _buildMapControls(),
         ],
       ),
-    );
-  }
-List<Map<String, dynamic>> removeDuplicateLinesByRouteName(List<Map<String, dynamic>> stopsList) {
-  for (var stop in stopsList) {
-    final lines = stop['lines'] as List;
-    final seenRouteNames = <String>{};
-
-    // Remove duplicates by route_name
-    final uniqueLines = lines.where((line) {
-      final routeName = line['route_name'];
-      if (seenRouteNames.contains(routeName)) {
-        return false;
-      } else {
-        seenRouteNames.add(routeName);
-        return true;
-      }
-    }).toList();
-
-    stop['lines'] = uniqueLines;
-  }
-
-  return stopsList;
-}
-
-void _selectStop(Map<String, dynamic> stop) {
-    setState(() => selectedStop = stop);
-
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) {
-        final lines = stop['lines'] as List<dynamic>;
-        final ids = <String>{};
-        final uniqueLines = lines.where((l) => ids.add(l['line_id'])).toList();
-
-        return SizedBox(
-          height: 400,
-          child: Column(
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('Lignes desservant cet arrêt', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: uniqueLines.length,
-                  itemBuilder: (context, index) {
-                    final line = uniqueLines[index];
-                    final lineId = line['line_id'];
-                    return ListTile(
-                      leading: Icon(Icons.directions_bus, color: line['color_final']),
-                      title: Text(line['route_name'] ?? 'Ligne $lineId'),
-                      trailing: IconButton(
-                        icon: Icon(_displayedLines.contains(lineId) ? Icons.visibility_off : Icons.visibility),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _toggleLineTrajectory(lineId);
-                        },
-                      ),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BusLineDetailsScreen(lineData: line),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              )
-            ],
-          ),
-        );
-      },
     );
   }
 }
