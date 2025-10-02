@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'package:bus_app/screens/search_firebase/route_details_screen.dart';
 import 'package:flutter/material.dart';

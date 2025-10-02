@@ -7,6 +7,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:http/http.dart' as http;
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 
+import '../models/directions_response.dart' as dr;
 import '../models/route_frbase.dart';
 
 class RouteMapScreenV1 extends StatefulWidget {
@@ -182,12 +183,13 @@ class _RouteMapScreenV1State extends State<RouteMapScreenV1> {
     final response = await http.get(url);
 
     if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      if (data['status'] != 'OK' || data['routes'].isEmpty) {
-        throw Exception('Google Directions API error: ${data['status']}');
+      final directions = dr.DirectionsResponse.fromJson(json.decode(response.body));
+
+      if (directions.status != 'OK' || directions.routes.isEmpty) {
+        throw Exception('Google Directions API error: ${directions.status}');
       }
 
-      final encodedPolyline = data['routes'][0]['overview_polyline']['points'];
+      final encodedPolyline = directions.routes.first.overviewPolyline.points;
       final decodedPoints = PolylinePoints().decodePolyline(encodedPolyline);
 
       return decodedPoints.map((p) => LatLng(p.latitude, p.longitude)).toList();
@@ -195,8 +197,4 @@ class _RouteMapScreenV1State extends State<RouteMapScreenV1> {
       throw Exception('Failed to fetch walking route: ${response.body}');
     }
   }
-
-  
 }
-
-

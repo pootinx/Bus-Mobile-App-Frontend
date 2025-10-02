@@ -364,36 +364,7 @@ class _SearchRouteScreenState extends State<SearchRouteScreen> {
               const CircularProgressIndicator(),
             ],
             if (!isLoading && firestoreResult != null) ...[
-              const SizedBox(height: 8),
-              // Show route summary with calculated distance
-              // Container(
-              //   padding: const EdgeInsets.all(16),
-              //   margin: const EdgeInsets.only(bottom: 16),
-              //   decoration: BoxDecoration(
-              //     color: Colors.blue.shade50,
-              //     borderRadius: BorderRadius.circular(12),
-              //     border: Border.all(color: Colors.blue.shade200),
-              //   ),
-              //   child: Column(
-              //     crossAxisAlignment: CrossAxisAlignment.start,
-              //     children: [
-              //       Text(
-              //         'Ligne: ${firestoreResult!.lineName}',
-              //         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              //       ),
-              //       const SizedBox(height: 8),
-              //       Text(
-              //         'Distance estimée: ${firestoreResult!.distance}',
-              //         style: const TextStyle(fontSize: 14, color: Colors.black87),
-              //       ),
-              //       Text(
-              //         'Durée: ${_calculerDureeParcourue(firestoreResult!.startTime, firestoreResult!.endTime)}',
-              //         style: const TextStyle(fontSize: 14, color: Colors.black87),
-              //       ),
-              //     ],
-              //   ),
-              // ),
-              
+              const SizedBox(height: 8),          
               Expanded(
                 child: ListView.builder(
                   itemCount: nextTrips.length > 3 ? 3 : nextTrips.length,
