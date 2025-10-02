@@ -1,5 +1,6 @@
 
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -128,7 +129,11 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
   @override
   void initState() {
     super.initState();
-    _setupMapData();
+    _initMapData();
+  }
+  
+  void _initMapData() async {
+    await _setupMapData();
   }
   
   List<LatLng> _decodePolyline(String encoded) {
@@ -156,7 +161,31 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
     return polyline;
   }
 
-  void _setupMapData() {
+  Future<BitmapDescriptor> _createDotMarkerBitmap(Color color) async {
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+    final Paint paint = Paint()..color = color;
+    const double radius = 20.0;
+
+    canvas.drawCircle(
+      const Offset(radius, radius),
+      radius,
+      paint,
+    );
+
+    paint.color = Colors.white;
+    canvas.drawCircle(
+      const Offset(radius, radius),
+      radius - 5,
+      paint,
+    );
+
+    final img = await pictureRecorder.endRecording().toImage(radius.toInt() * 2, radius.toInt() * 2);
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(data!.buffer.asUint8List());
+  }
+
+  Future<void> _setupMapData() async {
     if (widget.route.polyline != null && widget.route.polyline!.isNotEmpty) {
         final polylineCoordinates = _decodePolyline(widget.route.polyline!);
         if (polylineCoordinates.isNotEmpty) {
@@ -170,17 +199,15 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
         }
     }
 
+    final stopIcon = await _createDotMarkerBitmap(widget.color);
+
     for (int i = 0; i < widget.stops.length; i++) {
       final stop = widget.stops[i];
       _markers.add(Marker(
         markerId: MarkerId(stop.id.toString()),
         position: LatLng(stop.lat, stop.lon),
         infoWindow: InfoWindow(title: stop.name),
-        icon: (i == 0)
-            ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)
-            : (i == widget.stops.length - 1)
-              ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed)
-              : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+        icon: stopIcon,
       ));
     }
 
@@ -188,6 +215,10 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
         _initialCameraPosition = _calculateCenter(_markers.map((m) => m.position).toList());
     } else if (_initialCameraPosition == null) {
         _initialCameraPosition = const LatLng(33.57, -7.59);
+    }
+
+    if(mounted){
+        setState((){});
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _zoomToFitRoute());
@@ -236,7 +267,7 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
           height: MediaQuery.of(context).size.height * 0.4,
           child: GoogleMap(
                   onMapCreated: _onMapCreated,
-                  initialCameraPosition: CameraPosition(target: _initialCameraPosition!, zoom: 12),
+                  initialCameraPosition: CameraPosition(target: _initialCameraPosition ?? const LatLng(33.57, -7.59), zoom: 12),
                   polylines: _polylines,
                   markers: _markers,
                   mapToolbarEnabled: false,

@@ -1,5 +1,6 @@
 
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -30,7 +31,10 @@ class _BusLineDetailsScreenState extends State<BusLineDetailsScreen> {
   @override
   void initState() {
     super.initState();
-    
+    _init();
+  }
+
+  Future<void> _init() async {
     final data = widget.lineData;
     final List<LatLng> polylinePoints = _decodePolyline(data['polyline']);
     stops = List<Map<String, dynamic>>.from(data['stops'] ?? []);
@@ -44,7 +48,7 @@ class _BusLineDetailsScreenState extends State<BusLineDetailsScreen> {
       lineColor = Colors.blue;
     }
 
-    _setupGoogleMapData(polylinePoints, stops);
+    await _setupGoogleMapData(polylinePoints, stops);
     _initializeLocation();
   }
 
@@ -100,7 +104,31 @@ class _BusLineDetailsScreenState extends State<BusLineDetailsScreen> {
   
   // --- Map Setup and Control Methods for Google Maps ---
 
-  void _setupGoogleMapData(List<LatLng> polylinePoints, List<Map<String, dynamic>> stops) {
+  Future<BitmapDescriptor> _createDotMarkerBitmap(Color color) async {
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+    final Paint paint = Paint()..color = color;
+    const double radius = 20.0;
+
+    canvas.drawCircle(
+      const Offset(radius, radius),
+      radius,
+      paint,
+    );
+
+    paint.color = Colors.white;
+    canvas.drawCircle(
+      const Offset(radius, radius),
+      radius - 5,
+      paint,
+    );
+
+    final img = await pictureRecorder.endRecording().toImage(radius.toInt() * 2, radius.toInt() * 2);
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(data!.buffer.asUint8List());
+  }
+
+  Future<void> _setupGoogleMapData(List<LatLng> polylinePoints, List<Map<String, dynamic>> stops) async {
     // 1. Create Polyline
     _polylines.add(Polyline(
       polylineId: PolylineId(widget.lineData['route_name'] ?? 'line'),
@@ -110,6 +138,8 @@ class _BusLineDetailsScreenState extends State<BusLineDetailsScreen> {
     ));
 
     // 2. Create Markers for stops
+    final BitmapDescriptor stopIcon = await _createDotMarkerBitmap(lineColor);
+
     for (int i = 0; i < stops.length; i++) {
       final stop = stops[i];
       final lat = stop['latitude'] ?? 0.0;
@@ -121,9 +151,7 @@ class _BusLineDetailsScreenState extends State<BusLineDetailsScreen> {
         markerId: MarkerId(stop['name'] ?? 'stop_$i'),
         position: LatLng(lat, lng),
         infoWindow: InfoWindow(title: stop['name']),
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-          (i == 0 || i == stops.length -1) ? BitmapDescriptor.hueViolet : BitmapDescriptor.hueOrange
-        ),
+        icon: stopIcon,
       ));
     }
 
@@ -134,6 +162,10 @@ class _BusLineDetailsScreenState extends State<BusLineDetailsScreen> {
       _initialCameraPosition = LatLng(stops.first['latitude'], stops.first['longitude']);
     } else {
       _initialCameraPosition = const LatLng(34.02, -6.83); // Fallback
+    }
+
+    if (mounted) {
+      setState(() {});
     }
   }
   
