@@ -1,3 +1,4 @@
+
 import 'package:bus_app/screens/bus_lines_screen.dart';
 import 'package:bus_app/screens/search_firebase/search.dart';
 import 'package:bus_app/screens/stations_screen.dart';
@@ -14,7 +15,7 @@ class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
 
   final List<Widget> _screens = [
-    const SearchRouteScreenV1(),
+    const SearchRouteScreen(),
     const StationsScreen(),
     const BusLinesScreen(), // This will be replaced with a nested navigator
   ];

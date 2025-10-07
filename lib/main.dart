@@ -1,4 +1,3 @@
-import 'package:bus_app/screens/add_bus_screen.dart';
 import 'package:bus_app/screens/main_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -44,9 +43,6 @@ class MyApp extends StatelessWidget {
         fontFamily: 'Roboto',
       ),
       home: const MainScreen(),
-      routes: {
-        '/add_bus': (context) => const AddBusScreen(),
-      },
     );
   }
 }

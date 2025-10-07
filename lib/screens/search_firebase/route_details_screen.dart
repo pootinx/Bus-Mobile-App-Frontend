@@ -1,120 +1,35 @@
 
-import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
-import 'search.dart';
+import 'dart:math';
 
-class Stop {
-  final int id;
-  final String name;
-  final double lat;
-  final double lon;
+class RouteDetailsScreen extends StatelessWidget {
+  final Map<String, dynamic> routeData;
 
-  Stop({required this.id, required this.name, required this.lat, required this.lon});
-
-  factory Stop.fromJson(Map<String, dynamic> json) {
-    return Stop(
-      id: json['id'],
-      name: json['name'] ?? 'Unnamed Stop',
-      lat: (json['lat'] as num?)?.toDouble() ?? 0.0,
-      lon: (json['lon'] as num?)?.toDouble() ?? 0.0,
-    );
-  }
-}
-
-class RouteDetailsScreen extends StatefulWidget {
-  final TobisRoute route;
-
-  const RouteDetailsScreen({Key? key, required this.route}) : super(key: key);
-
-  @override
-  _RouteDetailsScreenState createState() => _RouteDetailsScreenState();
-}
-
-class _RouteDetailsScreenState extends State<RouteDetailsScreen> {
-  Future<List<Stop>>? _stopsFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _stopsFuture = _fetchStopsForLine(widget.route.lineId);
-  }
-
-  Future<List<Stop>> _fetchStopsForLine(int lineId) async {
-    final url = 'https://tobis-backend.onrender.com/station/stops?line_id=$lineId';
-    try {
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data.map((stopJson) => Stop.fromJson(stopJson)).toList();
-      } else {
-        throw Exception('Failed to load stops: HTTP ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Error fetching stops: $e');
-    }
-  }
-
-  Color _hexToColor(String hex) {
-    hex = hex.replaceAll('#', '');
-    if (hex.length == 6) hex = 'FF$hex';
-    return Color(int.parse(hex, radix: 16));
-  }
+  const RouteDetailsScreen({Key? key, required this.routeData}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final routeColor = _hexToColor(widget.route.color ?? '#FFA500');
+    const routeName = 'Route Details';
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Ligne ${widget.route.routeName}'),
-        backgroundColor: routeColor,
+        title: const Text(routeName),
+        backgroundColor: Colors.purple,
         foregroundColor: Colors.white,
       ),
-      body: FutureBuilder<List<Stop>>(
-        future: _stopsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  'Failed to load route details:\n${snapshot.error}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.red, fontSize: 16),
-                ),
-              ),
-            );
-          }
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text('No stops found for this line.'));
-          }
-          
-          final allStops = snapshot.data!;
-          
-          return RouteDetailsView(
-            key: ValueKey(widget.route.lineId), 
-            route: widget.route, 
-            stops: allStops,
-            color: routeColor,
-          );
-        },
+      body: RouteDetailsView(
+        routeData: routeData,
       ),
     );
   }
 }
 
 class RouteDetailsView extends StatefulWidget {
-  final TobisRoute route;
-  final List<Stop> stops;
-  final Color color;
+  final Map<String, dynamic> routeData;
 
-  const RouteDetailsView({Key? key, required this.route, required this.stops, required this.color}) : super(key: key);
+  const RouteDetailsView({Key? key, required this.routeData}) : super(key: key);
 
   @override
   _RouteDetailsViewState createState() => _RouteDetailsViewState();
@@ -129,36 +44,83 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
   @override
   void initState() {
     super.initState();
-    _initMapData();
+    _setupMapData();
   }
-  
-  void _initMapData() async {
-    await _setupMapData();
+
+  Color _getColorForLine(String lineName) {
+    final hash = lineName.hashCode;
+    final r = (hash & 0xFF0000) >> 16;
+    final g = (hash & 0x00FF00) >> 8;
+    final b = hash & 0x0000FF;
+    return Color.fromRGBO(r, g, b, 1);
   }
-  
-  List<LatLng> _decodePolyline(String encoded) {
-    List<LatLng> polyline = [];
-    int index = 0, len = encoded.length, lat = 0, lng = 0;
-    while (index < len) {
-      int b, shift = 0, result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lat += dlat;
-      shift = 0; result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lng += dlng;
-      polyline.add(LatLng(lat / 1E5, lng / 1E5));
+
+  void _setupMapData() async {
+    final leg = widget.routeData['legs'][0];
+    final steps = leg['steps'] as List;
+    
+    List<LatLng> allPoints = [];
+    int polylineIdCounter = 0;
+
+    for (final step in steps) {
+      final polylinePoints = _decodePolyline(step['polyline']['points']);
+      allPoints.addAll(polylinePoints);
+
+      final polylineId = 'polyline_${polylineIdCounter++}';
+
+      if (step['travel_mode'] == 'TRANSIT') {
+        final transitDetails = step['transit_details'];
+        final line = transitDetails['line'];
+        final lineName = line['short_name'] ?? line['name'] ?? 'Bus';
+        final lineColor = _getColorForLine(lineName);
+        
+        _polylines.add(Polyline(
+          polylineId: PolylineId(polylineId),
+          points: polylinePoints,
+          color: lineColor,
+          width: 6,
+        ));
+
+        final departureStop = transitDetails['departure_stop'];
+        final arrivalStop = transitDetails['arrival_stop'];
+        final stopIcon = await _createDotMarkerBitmap(lineColor);
+        _addMarker(departureStop, stopIcon);
+        _addMarker(arrivalStop, stopIcon);
+
+      } else if (step['travel_mode'] == 'WALKING') {
+        _polylines.add(Polyline(
+          polylineId: PolylineId(polylineId),
+          points: polylinePoints,
+          color: Colors.blue,
+          width: 5,
+          patterns: [PatternItem.dot, PatternItem.gap(10)],
+        ));
+      }
     }
-    return polyline;
+
+    if (allPoints.isNotEmpty) {
+      _initialCameraPosition = _calculateCenter(allPoints);
+    } else {
+      _initialCameraPosition = const LatLng(33.57, -7.59);
+    }
+
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _addMarker(Map<String, dynamic> stop, BitmapDescriptor icon) {
+    final location = stop['location'];
+    final lat = location['lat'];
+    final lng = location['lng'];
+    final name = stop['name'];
+
+    _markers.add(Marker(
+      markerId: MarkerId(name),
+      position: LatLng(lat, lng),
+      infoWindow: InfoWindow(title: name),
+      icon: icon,
+    ));
   }
 
   Future<BitmapDescriptor> _createDotMarkerBitmap(Color color) async {
@@ -179,160 +141,127 @@ class _RouteDetailsViewState extends State<RouteDetailsView> {
       radius - 5,
       paint,
     );
-
-    final img = await pictureRecorder.endRecording().toImage(radius.toInt() * 2, radius.toInt() * 2);
+    
+    final img = await pictureRecorder.endRecording().toImage((radius * 2).toInt(), (radius * 2).toInt());
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.fromBytes(data!.buffer.asUint8List());
   }
 
-  Future<void> _setupMapData() async {
-    if (widget.route.polyline != null && widget.route.polyline!.isNotEmpty) {
-        final polylineCoordinates = _decodePolyline(widget.route.polyline!);
-        if (polylineCoordinates.isNotEmpty) {
-            _polylines.add(Polyline(
-                polylineId: const PolylineId('route_line'),
-                points: polylineCoordinates,
-                color: widget.color,
-                width: 5,
-            ));
-            _initialCameraPosition = _calculateCenter(polylineCoordinates);
-        }
+  List<LatLng> _decodePolyline(String encoded) {
+    List<LatLng> points = [];
+    int index = 0, len = encoded.length;
+    int lat = 0, lng = 0;
+
+    while (index < len) {
+      int b, shift = 0, result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lat += dlat;
+
+      shift = 0;
+      result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+      lng += dlng;
+
+      points.add(LatLng(lat / 1E5, lng / 1E5));
     }
-
-    final stopIcon = await _createDotMarkerBitmap(widget.color);
-
-    for (int i = 0; i < widget.stops.length; i++) {
-      final stop = widget.stops[i];
-      _markers.add(Marker(
-        markerId: MarkerId(stop.id.toString()),
-        position: LatLng(stop.lat, stop.lon),
-        infoWindow: InfoWindow(title: stop.name),
-        icon: stopIcon,
-      ));
-    }
-
-    if (_initialCameraPosition == null && _markers.isNotEmpty) {
-        _initialCameraPosition = _calculateCenter(_markers.map((m) => m.position).toList());
-    } else if (_initialCameraPosition == null) {
-        _initialCameraPosition = const LatLng(33.57, -7.59);
-    }
-
-    if(mounted){
-        setState((){});
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => _zoomToFitRoute());
+    return points;
   }
 
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
-    _zoomToFitRoute();
-  }
-
-  void _zoomToFitRoute() {
-    if (_mapController == null) return;
-    final points = _polylines.isNotEmpty ? _polylines.first.points : _markers.map((m) => m.position).toList();
-    if (points.length > 1) {
-      _mapController!.animateCamera(CameraUpdate.newLatLngBounds(_getBounds(points), 60.0));
+    if (_polylines.isNotEmpty) {
+      final allPoints = _polylines.expand((p) => p.points).toList();
+      if (allPoints.length > 1) {
+          final bounds = _getBounds(allPoints);
+          _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80.0));
+      }
     }
   }
   
-  LatLng _calculateCenter(List<LatLng> points) {
-      if(points.isEmpty) return const LatLng(33.57, -7.59);
-      double minLat = points.first.latitude, maxLat = points.first.latitude;
-      double minLon = points.first.longitude, maxLon = points.first.longitude;
-      for (final point in points) {
-          minLat = (point.latitude < minLat) ? point.latitude : minLat;
-          maxLat = (point.latitude > maxLat) ? point.latitude : maxLat;
-          minLon = (point.longitude < minLon) ? point.longitude : minLon;
-          maxLon = (point.longitude > maxLon) ? point.longitude : maxLon;
-      }
-      return LatLng((minLat + maxLat) / 2, (minLon + maxLon) / 2);
+  LatLngBounds _getBounds(List<LatLng> points) {
+      final lats = points.map((p) => p.latitude);
+      final lngs = points.map((p) => p.longitude);
+      return LatLngBounds(
+        southwest: LatLng(lats.reduce(min), lngs.reduce(min)),
+        northeast: LatLng(lats.reduce(max), lngs.reduce(max)),
+      );
   }
 
-  LatLngBounds _getBounds(List<LatLng> points) {
-    return LatLngBounds(
-      southwest: LatLng(points.map((p) => p.latitude).reduce((a,b) => a < b ? a : b), points.map((p) => p.longitude).reduce((a,b) => a < b ? a : b)),
-      northeast: LatLng(points.map((p) => p.latitude).reduce((a,b) => a > b ? a : b), points.map((p) => p.longitude).reduce((a,b) => a > b ? a : b)),
+  LatLng _calculateCenter(List<LatLng> points) {
+    if (points.isEmpty) return const LatLng(33.57, -7.59);
+    final bounds = _getBounds(points);
+    return LatLng(
+      (bounds.southwest.latitude + bounds.northeast.latitude) / 2,
+      (bounds.southwest.longitude + bounds.northeast.longitude) / 2,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final stops = widget.stops;
+    final leg = widget.routeData['legs'][0];
+    final steps = leg['steps'] as List;
 
     return Column(
       children: [
         SizedBox(
           height: MediaQuery.of(context).size.height * 0.4,
           child: GoogleMap(
-                  onMapCreated: _onMapCreated,
-                  initialCameraPosition: CameraPosition(target: _initialCameraPosition ?? const LatLng(33.57, -7.59), zoom: 12),
-                  polylines: _polylines,
-                  markers: _markers,
-                  mapToolbarEnabled: false,
-                ),
-        ),
-        Container(
-          padding: const EdgeInsets.all(16),
-          width: double.infinity,
-          color: widget.color,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                (stops.isNotEmpty)
-                    ? '${stops.first.name} → ${stops.last.name}'
-                    : 'No stops found',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 8),
-              Text('${stops.length} stops', style: const TextStyle(color: Colors.white, fontSize: 15)),
-            ],
+            onMapCreated: _onMapCreated,
+            initialCameraPosition: CameraPosition(
+              target: _initialCameraPosition ?? const LatLng(33.57, -7.59),
+              zoom: 12,
+            ),
+            polylines: _polylines,
+            markers: _markers,
+            mapToolbarEnabled: false,
           ),
         ),
         Expanded(
           child: ListView.builder(
-            padding: EdgeInsets.zero,
-            itemCount: stops.length,
+            itemCount: steps.length,
             itemBuilder: (context, index) {
-              final stop = stops[index];
+              final step = steps[index];
+              final instruction = step['html_instructions'].replaceAll(RegExp(r'<[^>]*>'), '');
+              final duration = step['duration']['text'];
+              
+              IconData iconData;
+              Color stepColor = Colors.grey;
+              String lineName = '';
+
+              if(step['travel_mode'] == 'WALKING'){
+                iconData = Icons.directions_walk;
+                stepColor = Colors.blue;
+              } else if (step['travel_mode'] == 'TRANSIT') {
+                iconData = Icons.directions_bus;
+                final line = step['transit_details']['line'];
+                lineName = line['short_name'] ?? line['name'] ?? '';
+                stepColor = _getColorForLine(lineName);
+              } else {
+                iconData = Icons.pin_drop;
+              }
+
               return ListTile(
-                leading: _buildStopIndicator(index, stops.length, widget.color),
-                title: Text(stop.name),
-                subtitle: Text('Stop ${index + 1}', style: TextStyle(color: Colors.grey.shade600)),
+                leading: Icon(iconData, color: stepColor),
+                title: Text(instruction),
+                subtitle: Text(duration),
+                trailing: lineName.isNotEmpty 
+                    ? Text(lineName, style: TextStyle(color: stepColor, fontWeight: FontWeight.bold))
+                    : null,
               );
             },
           ),
-        )
+        ),
       ],
-    );
-  }
-
-  Widget _buildStopIndicator(int index, int stopCount, Color color) {
-    return SizedBox(
-      width: 40,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (index > 0) Expanded(child: Container(width: 2, color: color.withOpacity(0.3))),
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              border: Border.all(color: color, width: 2),
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-            child: (index == 0)
-                ? Icon(Icons.play_arrow_rounded, color: color, size: 14)
-                : (index == stopCount - 1)
-                  ? Icon(Icons.location_on, color: color, size: 14)
-                  : CircleAvatar(radius: 4, backgroundColor: color.withOpacity(0.5)),
-          ),
-          if (index < stopCount - 1) Expanded(child: Container(width: 2, color: color.withOpacity(0.3))),
-        ],
-      ),
     );
   }
 }
