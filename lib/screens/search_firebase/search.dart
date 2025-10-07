@@ -104,11 +104,13 @@ class _SearchRouteScreenState extends State<SearchRouteScreen> {
           _departController.text = placeText;
           _startLatLng = LatLng(lat, lng);
           _departSuggestions = [];
+          _showDepartSuggestions = false;
           _departFocusNode.unfocus();
         } else {
           _arriveeController.text = placeText;
           _destinationLatLng = LatLng(lat, lng);
           _arriveeSuggestions = [];
+          _showArriveeSuggestions = false;
           _arriveeFocusNode.unfocus();
         }
       });
@@ -199,113 +201,27 @@ class _SearchRouteScreenState extends State<SearchRouteScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Search Route"),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: Colors.black,
-      ),
+      backgroundColor: Colors.blue[50],
       body: GestureDetector(
         onTap: () {
           _departFocusNode.unfocus();
           _arriveeFocusNode.unfocus();
+          setState(() {
+            _showDepartSuggestions = false;
+            _showArriveeSuggestions = false;
+          });
         },
-        child: Column(
-          children: [
-            _buildSearchCard(),
-            Expanded(
-              child: Stack(
-                children: [
-                  _isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : _buildResults(),
-                  if (_showDepartSuggestions && _departSuggestions.isNotEmpty)
-                    _buildSuggestionsList(isDepart: true),
-                  if (_showArriveeSuggestions && _arriveeSuggestions.isNotEmpty)
-                    _buildSuggestionsList(isDepart: false),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSuggestionsList({required bool isDepart}) {
-    final suggestions = isDepart ? _departSuggestions : _arriveeSuggestions;
-    final topPosition = isDepart ? 60.0 : 125.0;
-
-    return Positioned(
-      top: 0,
-      left: 15,
-      right: 15,
-      child: Material(
-        elevation: 4.0,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          constraints: const BoxConstraints(maxHeight: 200),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: ListView.builder(
-            padding: EdgeInsets.zero,
-            itemCount: suggestions.length,
-            itemBuilder: (context, index) {
-              final suggestion = suggestions[index];
-              return ListTile(
-                title: Text(suggestion['description']!),
-                onTap: () => _onSuggestionSelected(suggestion, isDepart),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSearchCard() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Stack(
-            alignment: Alignment.center,
+        child: SingleChildScrollView(
+          child: Column(
             children: [
-              Column(
-                children: [
-                  _buildSearchTextField(
-                    controller: _departController,
-                    focusNode: _departFocusNode,
-                    hint: 'From',
-                    icon: Icons.gps_fixed,
-                    isDepart: true,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildSearchTextField(
-                    controller: _arriveeController,
-                    focusNode: _arriveeFocusNode,
-                    hint: 'To',
-                    icon: Icons.location_on,
-                    isDepart: false,
-                  ),
-                ],
-              ),
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.grey.shade300)
-                ),
-                child: IconButton(
-                  icon: const Icon(Icons.swap_vert, color: Colors.blue),
-                  onPressed: _swapLocations,
-                ),
-              )
+              _buildHeader(),
+              _buildSearchSection(),
+              _isLoading
+                  ? const Center(child: Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: CircularProgressIndicator(),
+                    ))
+                  : _buildResults(),
             ],
           ),
         ),
@@ -313,11 +229,124 @@ class _SearchRouteScreenState extends State<SearchRouteScreen> {
     );
   }
 
-  Widget _buildSearchTextField({
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 50, 20, 70),
+      decoration: const BoxDecoration(
+        color: Colors.blue,
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(30),
+          bottomRight: Radius.circular(30),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Tobis',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                icon: const Icon(Icons.notifications, color: Colors.white),
+                onPressed: () {},
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Bienvenu!',
+            style: TextStyle(color: Colors.white, fontSize: 24,fontWeight: FontWeight.bold,),
+          ),
+          const Text(
+            'Trouvez facilement le meilleur itinéraire en bus pour vousdéplacer dans la ville',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 18,
+              
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchSection() {
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: Container(
+            margin: const EdgeInsets.only(top: 20),
+            padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 15.0),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.2),
+                  spreadRadius: 3,
+                  blurRadius: 10,
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                _buildInputCard(
+                  controller: _departController,
+                  focusNode: _departFocusNode,
+                  hint: 'From',
+                  isDepart: true,
+                ),
+                if (_showDepartSuggestions && _departSuggestions.isNotEmpty)
+                  _buildSuggestionsList(isDepart: true),
+                
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    const Divider(),
+                    InkWell(
+                      onTap: _swapLocations,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[50],
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.blue.shade100)
+                        ),
+                        child: const Icon(Icons.swap_vert, color: Colors.blue, size: 24),
+                      ),
+                    ),
+                  ],
+                ),
+                
+                _buildInputCard(
+                  controller: _arriveeController,
+                  focusNode: _arriveeFocusNode,
+                  hint: 'To',
+                  isDepart: false,
+                ),
+                if (_showArriveeSuggestions && _arriveeSuggestions.isNotEmpty)
+                  _buildSuggestionsList(isDepart: false),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInputCard({
     required TextEditingController controller,
     required FocusNode focusNode,
     required String hint,
-    required IconData icon,
     required bool isDepart,
   }) {
     return TextField(
@@ -325,29 +354,58 @@ class _SearchRouteScreenState extends State<SearchRouteScreen> {
       focusNode: focusNode,
       onChanged: (input) => _onInputChanged(input, isDepart),
       decoration: InputDecoration(
-        labelText: hint,
-        labelStyle: const TextStyle(color: Colors.grey),
-        prefixIcon: Icon(icon, color: Colors.grey),
+        hintText: hint,
+        border: InputBorder.none,
         suffixIcon: isDepart
             ? IconButton(
-                icon: const Icon(Icons.my_location, color: Colors.orange),
+                icon: const Icon(Icons.gps_not_fixed, color: Colors.orange),
                 onPressed: _setCurrentLocationAsDeparture,
               )
-            : IconButton(
-                icon: const Icon(Icons.search, color: Colors.blue),
-                onPressed: _searchRoutes,
-              ),
-        border: InputBorder.none,
-        filled: true,
-        fillColor: Colors.grey[50],
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            : InkWell(
+                onTap: _searchRoutes,
+                child: Container(
+                  margin: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [Colors.blue.shade400, Colors.blue.shade700],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight
+                    )
+                  ),
+                  child: const Icon(Icons.search, color: Colors.white, size: 24),
+                ),
+            )
+      ),
+    );
+  }
+
+  Widget _buildSuggestionsList({required bool isDepart}) {
+    final suggestions = isDepart ? _departSuggestions : _arriveeSuggestions;
+    
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 150),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: ListView.builder(
+        padding: EdgeInsets.zero,
+        itemCount: suggestions.length,
+        itemBuilder: (context, index) {
+          final suggestion = suggestions[index];
+          return ListTile(
+            title: Text(suggestion['description']!),
+            onTap: () => _onSuggestionSelected(suggestion, isDepart),
+          );
+        },
       ),
     );
   }
 
   Widget _buildResults() {
     if (_directionsResult == null) {
-      return const Center(child: Text("Enter a departure and destination to see the routes."));
+      return Container();
     }
 
     final allRoutes = _directionsResult!['routes'] as List;
@@ -364,16 +422,30 @@ class _SearchRouteScreenState extends State<SearchRouteScreen> {
     }).toList();
 
     if (busRoutes.isEmpty) {
-      return const Center(child: Text("No bus routes available."));
+      return const Center(child: Padding(
+        padding: EdgeInsets.all(20.0),
+        child: Text("No bus routes available.", style: TextStyle(fontSize: 16, color: Colors.grey)),
+      ));
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      itemCount: busRoutes.length,
-      itemBuilder: (context, index) {
-        final route = busRoutes[index];
-        return _buildRouteCard(route);
-      },
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("Available Routes", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: busRoutes.length,
+            itemBuilder: (context, index) {
+              final route = busRoutes[index];
+              return _buildRouteCard(route);
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -394,46 +466,40 @@ class _SearchRouteScreenState extends State<SearchRouteScreen> {
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8.0),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '$departureTime → $arrivalTime',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                Text(
-                  totalDuration,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.purple),
-                ),
-              ],
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      elevation: 3,
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => RouteDetailsScreen(routeData: route),
             ),
-            const Divider(height: 20),
-            ..._buildBusStepWidgets(busSteps),
-            const SizedBox(height: 10),
-             GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => RouteDetailsScreen(routeData: route),
-                  ),
-                );
-              },
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+          );
+        },
+        borderRadius: BorderRadius.circular(15),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Details', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
-                  Icon(Icons.arrow_forward_ios, color: Colors.blue, size: 14),
+                  Text(
+                    '$departureTime → $arrivalTime',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  Text(
+                    totalDuration,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue),
+                  ),
                 ],
               ),
-            ),
-          ],
+              const Divider(height: 20),
+              ..._buildBusStepWidgets(busSteps),
+            ],
+          ),
         ),
       ),
     );
@@ -448,43 +514,27 @@ class _SearchRouteScreenState extends State<SearchRouteScreen> {
         final lineName = line['short_name'] ?? line['name'] ?? 'N/A';
         final departureStop = transitDetails['departure_stop']['name'];
         final arrivalStop = transitDetails['arrival_stop']['name'];
-        final numStops = transitDetails['num_stops'].toString();
-        final duration = step['duration']['text'];
-        final departureTime = transitDetails['departure_time']['text'];
-        final arrivalTime = transitDetails['arrival_time']['text'];
-
+        
         widgets.add(
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            Row(
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _getColorForLine(lineName),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        lineName,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        '$departureStop → $arrivalStop',
-                        style: const TextStyle(fontWeight: FontWeight.w500),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(left: 8.0, top: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _getColorForLine(lineName),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                   child: Text(
-                    '$duration ($numStops stops) | $departureTime - $arrivalTime',
-                    style: TextStyle(color: Colors.grey[600]),
+                    lineName,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '$departureStop → $arrivalStop',
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
