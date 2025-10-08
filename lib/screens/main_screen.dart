@@ -1,7 +1,7 @@
 
 import 'package:bus_app/screens/bus_lines_screen.dart';
 import 'package:bus_app/screens/search_firebase/search.dart';
-import 'package:bus_app/screens/stations_screen.dart';
+import 'package:bus_app/screens/t_pass/t_pass_screen.dart';
 import 'package:flutter/material.dart';
 
 class MainScreen extends StatefulWidget {
@@ -16,8 +16,8 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = [
     const SearchRouteScreen(),
-    const StationsScreen(),
-    const BusLinesScreen(), // This will be replaced with a nested navigator
+    const TPassScreen(),
+    const BusLinesScreen(),
   ];
 
   void _onTabTapped(int index) {
@@ -40,7 +40,7 @@ class _MainScreenState extends State<MainScreen> {
         unselectedItemColor: Colors.grey,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.route), label: 'Itinéraires'),
-          BottomNavigationBarItem(icon: Icon(Icons.location_on), label: 'Stations'),
+          BottomNavigationBarItem(icon: Icon(Icons.credit_card), label: 'T-PASS'),
           BottomNavigationBarItem(icon: Icon(Icons.alt_route), label: 'Lignes'),
         ],
       ),
