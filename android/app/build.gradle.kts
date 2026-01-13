@@ -1,19 +1,40 @@
+
+import java.util.Properties
+
 plugins {
     id("com.android.application")
-    // START: FlutterFire Configuration
     id("com.google.gms.google-services")
-    // END: FlutterFire Configuration
     id("kotlin-android")
-    // Le plugin Flutter doit être appliqué après Android et Kotlin
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Function to read the key.properties file
+fun readKeystoreProperties(): Properties {
+    val properties = Properties()
+    val keystorePropertiesFile = rootProject.file("key.properties")
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { properties.load(it) }
+    }
+    return properties
+}
+
 android {
-    namespace = "com.example.bus_app"
+    namespace = "com.softelligy.tobis"
     compileSdk = flutter.compileSdkVersion
 
     // ✅ Fix du NDK version
     ndkVersion = "27.0.12077973"
+
+    val keystoreProperties = readKeystoreProperties()
+
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties.getProperty("keyAlias")
+            keyPassword = keystoreProperties.getProperty("keyPassword")
+            storeFile = file(keystoreProperties.getProperty("storeFile"))
+            storePassword = keystoreProperties.getProperty("storePassword")
+        }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -25,7 +46,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.bus_app"
+        applicationId = "com.softelligy.tobis"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -34,8 +55,7 @@ android {
 
     buildTypes {
         release {
-            // Utilise la clé debug pour pouvoir lancer flutter run --release
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

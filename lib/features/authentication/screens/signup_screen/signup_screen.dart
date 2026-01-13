@@ -9,6 +9,7 @@ class SignupScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Controllers are managed within the build method for a StatelessWidget
     final TextEditingController emailController = TextEditingController();
     final TextEditingController passwordController = TextEditingController();
     final TextEditingController fullNameController = TextEditingController();
@@ -95,14 +96,13 @@ class SignupScreen extends StatelessWidget {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () {
+                          // Corrected the order of arguments to match the AuthService method signature.
                           AuthService.to.createUserWithEmailAndPassword(
-                            fullNameController.text.trim(),
                             emailController.text.trim(),
                             passwordController.text.trim(),
+                            fullNameController.text.trim(),
                           );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('A verification email has been sent. Please check your inbox.')),
-                          );
+                          // Removed the misleading SnackBar. AuthService now handles feedback.
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF005C97),

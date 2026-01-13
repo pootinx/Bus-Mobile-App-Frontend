@@ -1,8 +1,38 @@
 
+import 'package:bus_app/features/authentication/services/profile_service.dart';
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
-class EditProfileScreen extends StatelessWidget {
+class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
+
+  @override
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  // Controllers to manage the text fields' state.
+  late final TextEditingController _nameController;
+  late final TextEditingController _emailController;
+
+  @override
+  void initState() {
+    super.initState();
+    // Get the user data from the ProfileService.
+    final user = ProfileService.to.user;
+
+    // Initialize the controllers with the user's current data.
+    _nameController = TextEditingController(text: user?.fullName ?? '');
+    _emailController = TextEditingController(text: user?.email ?? '');
+  }
+
+  @override
+  void dispose() {
+    // Clean up the controllers when the widget is removed from the tree.
+    _nameController.dispose();
+    _emailController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -10,7 +40,7 @@ class EditProfileScreen extends StatelessWidget {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Get.back(),
         ),
         title: const Text("Edit Profile", style: TextStyle(color: Colors.black)),
         backgroundColor: Colors.white,
@@ -36,56 +66,44 @@ class EditProfileScreen extends StatelessWidget {
               ],
             ),
             TextButton(
-              onPressed: () {},
+              onPressed: () {
+                // TODO: Implement image picking logic
+              },
               child: const Text("Edit image", style: TextStyle(color: Colors.blue)),
             ),
             const SizedBox(height: 30),
             TextFormField(
-              initialValue: "tylermason309@gmail.com",
+              controller: _emailController,
               decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.email_outlined),
-                labelText: "Email",
-                border: OutlineInputBorder(),
-                suffixIcon: Icon(Icons.cancel_outlined)
-              ),
+                  prefixIcon: Icon(Icons.email_outlined),
+                  labelText: "Email",
+                  border: OutlineInputBorder(),
+                  // The email is not editable, so the suffix icon is not needed.
+                  // suffixIcon: Icon(Icons.cancel_outlined)
+                ),
+              readOnly: true, // The email is the user's identifier and should not be changed.
             ),
             const SizedBox(height: 20),
             TextFormField(
-              initialValue: "Tyler Mason",
+              controller: _nameController,
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.person_outline),
                 labelText: "Name",
                 border: OutlineInputBorder(),
-                suffixIcon: Icon(Icons.cancel_outlined)
               ),
             ),
             const SizedBox(height: 30),
-            const Align(
-                alignment: Alignment.centerLeft,
-                child: Text("Change password", style: TextStyle(fontSize: 16))),
-            const SizedBox(height: 10),
-            TextFormField(
-              obscureText: true,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.lock_outline),
-                labelText: "Enter old password",
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextFormField(
-              obscureText: true,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.lock_outline),
-                labelText: "Enter new password",
-                border: OutlineInputBorder(),
-              ),
-            ),
+            // Note: Implementing a secure "Change Password" feature is a complex task
+            // that involves re-authentication and is left for future implementation.
             const SizedBox(height: 30),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {},
+                onPressed: () {
+                  // TODO: Implement save logic.
+                  // This will involve calling a method in the ProfileService to update
+                  // the user's data in Firestore.
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.black,
                   padding: const EdgeInsets.symmetric(vertical: 15),

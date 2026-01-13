@@ -97,6 +97,8 @@ class LoginScreen extends StatelessWidget {
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () {
+                          // The AuthService now handles all errors internally.
+                          // No need for a try-catch block here.
                           AuthService.to.signInWithEmailAndPassword(
                             emailController.text.trim(),
                             passwordController.text.trim(),

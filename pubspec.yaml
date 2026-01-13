@@ -20,18 +20,22 @@ dependencies:
   url_launcher: ^6.3.1
   rename: ^3.1.0
   flutter_launcher_icons: ^0.14.3
-  geolocator: ^14.0.1
+  geolocator: ^12.0.0
   geocoding: ^4.0.0
   flutter_keyboard_visibility: ^6.0.0
   firebase_core: ^2.30.0
+  firebase_auth: ^4.19.0
   cloud_firestore: ^4.17.0
+  firebase_crashlytics: ^3.5.0
   sliding_up_panel: ^2.0.0
   flutter_svg: ^2.2.0
   permission_handler: ^12.0.1
   connectivity_plus: ^6.1.4
   internet_connection_checker: ^3.0.1
   google_maps_flutter: ^2.12.3
-
+  lottie: ^3.1.2
+  get: ^4.6.6
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:
@@ -45,6 +49,7 @@ flutter:
     - .env
     - assets/images/
     - assets/icons/
+    - assets/animations/
     - assets/gtfs_lines_nested.json
     - assets/casa.json
 

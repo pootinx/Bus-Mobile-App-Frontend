@@ -1,7 +1,8 @@
+
+import 'package:bus_app/services/location_service.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geocoding/geocoding.dart';
-import 'package:geolocator/geolocator.dart';
 
 import 'bus_line_details_screen.dart';
 
@@ -38,6 +39,7 @@ class CityListScreen extends StatefulWidget {
 class _CityListScreenState extends State<CityListScreen> {
   List<String> allCities = [];
   bool _isLoading = true;
+  final LocationService _locationService = LocationService();
 
   @override
   void initState() {
@@ -68,17 +70,8 @@ class _CityListScreenState extends State<CityListScreen> {
 
   Future<void> _detectAndNavigate() async {
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
-        return;
-      }
-
-      final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      final latLng = await _locationService.getCurrentLocation();
+      final placemarks = await placemarkFromCoordinates(latLng.latitude, latLng.longitude);
 
       if (placemarks.isNotEmpty && mounted) {
         final cityName = placemarks.first.locality?.toLowerCase().trim();

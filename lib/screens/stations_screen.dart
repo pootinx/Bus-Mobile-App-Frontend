@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:bus_app/screens/bus_line_details_screen.dart';
+import 'package:bus_app/services/location_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -19,7 +20,8 @@ class StationsScreen extends StatefulWidget {
 class _StationsScreenState extends State<StationsScreen> with TickerProviderStateMixin {
   GoogleMapController? _mapController;
   LatLng? userLocation;
-  
+
+  final LocationService _locationService = LocationService();
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
 
@@ -36,7 +38,7 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
   void initState() {
     super.initState();
     fetchAndPrintCities();
-    _startLocationTrackingAndAutoSearch();
+    _initializeScreen();
   }
 
   @override
@@ -49,29 +51,20 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
     _mapController = controller;
   }
 
-  void _startLocationTrackingAndAutoSearch() async {
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
-      setState(() => locationPermissionDenied = true);
-      return;
-    }
-
+  void _initializeScreen() async {
     try {
-      final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      final latLng = LatLng(position.latitude, position.longitude);
+      final latLng = await _locationService.getCurrentLocation();
+      if (!mounted) return;
 
       setState(() {
         userLocation = latLng;
-        _updateMarkers(); // Add user marker
+        locationPermissionDenied = false;
+        _updateMarkers();
       });
 
       _mapController?.animateCamera(CameraUpdate.newLatLngZoom(latLng, 14));
 
-      final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      final placemarks = await placemarkFromCoordinates(latLng.latitude, latLng.longitude);
       if (placemarks.isNotEmpty) {
         final city = placemarks.first.locality?.toLowerCase().trim();
         if (city != null && city.isNotEmpty) {
@@ -79,7 +72,9 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
         }
       }
     } catch (e) {
-      print('❌ Location or Geocoding failed: $e');
+      if (!mounted) return;
+      print('❌ Location permission denied or error in StationsScreen: $e');
+      setState(() => locationPermissionDenied = true);
     }
   }
 
@@ -125,7 +120,7 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
             'line_id': lineDoc.id,
             'route_name': lineData['route_name'] ?? 'Ligne Inconnue',
             'color': lineData['color'] ?? '#0000FF',
-            'polyline': encodedPolyline, 
+            'polyline': encodedPolyline,
             'stops': lineData['stops'],
           };
 
@@ -173,7 +168,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
   void _updateMarkers() {
     _markers.clear();
 
-    // Add user location marker
     if (userLocation != null) {
       _markers.add(Marker(
         markerId: const MarkerId('user_location'),
@@ -183,7 +177,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
       ));
     }
 
-    // Add stop markers
     for (final stop in stopsMap.values) {
        final lat = stop['lat'];
        final lon = stop['lon'];
@@ -202,7 +195,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
        ));
     }
     
-    // Trajectory endpoints
      for (final id in _displayedLines) {
       final traj = _lineTrajectories[id] ?? [];
       if (traj.isEmpty) continue;
@@ -224,8 +216,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
       }
     }
   }
-
-  // Helper functions (mostly unchanged, but adapted for Google Maps LatLng)
 
   List<LatLng> _decodePolyline(String encoded) {
     List<LatLng> points = [];
@@ -358,7 +348,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
     });
   }
   
-  // Stubs for functions that are not directly convertible or need more context
   Future<void> fetchAndPrintCities() async { 
      moroccoCities = await getFirestoreCities();
   }
@@ -401,7 +390,7 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
     List<int> v0 = List<int>.filled(t.length + 1, 0);
     List<int> v1 = List<int>.filled(t.length + 1, 0);
 
-    for (int i = 0; i < t.length + 1; i < i++) v0[i] = i;
+    for (int i = 0; i < t.length + 1; i++) v0[i] = i;
 
     for (int i = 0; i < s.length; i++) {
         v1[0] = i + 1;
@@ -417,8 +406,6 @@ class _StationsScreenState extends State<StationsScreen> with TickerProviderStat
   }
   
   BitmapDescriptor _createEndpointIcon(Color c, IconData ic) {
-      // This is a placeholder. For a true custom icon from a widget, you'd need a more complex function
-      // that can convert a widget to a BitmapDescriptor. For now, we'll use hue.
       if (ic == Icons.play_arrow) return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
       if (ic == Icons.stop) return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
       return BitmapDescriptor.defaultMarker;
