@@ -1,8 +1,8 @@
-
 import 'dart:async';
 
-import 'package:bus_app/features/authentication/services/auth_service.dart';
-import 'package:bus_app/features/authentication/services/profile_service.dart';
+import 'package:bus_app/features/auth/services/auth_service.dart';
+import 'package:bus_app/features/auth/services/profile_service.dart';
+import 'package:bus_app/core/theme/app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
@@ -71,14 +71,10 @@ class MyApp extends StatelessWidget {
     return GetMaterialApp(
       title: 'Bus Route Finder',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-        fontFamily: 'Roboto',
-      ),
+      theme: AppTheme.lightTheme,
       // We start with a simple, empty container. The AuthService is responsible
       // for all navigation, so it will replace this with the correct screen
-      // (LoginScreen or MainScreen) as soon as it initializes.
+      // (LoginScreen or MainPage) as soon as it initializes.
       home: const Scaffold(
         body: Center(
           child: CircularProgressIndicator(),
