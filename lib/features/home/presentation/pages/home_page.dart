@@ -98,7 +98,6 @@ class _HomePageState extends State<HomePage> {
             children: [
               FeatureBadge(icon: Icons.schedule, label: 'Temps réel', color: Colors.green),
               FeatureBadge(icon: Icons.navigation, label: 'Navigation', color: Colors.blue),
-              FeatureBadge(icon: Icons.location_on, label: 'Précis', color: Colors.orange),
             ],
           ),
           const SizedBox(height: 40),
@@ -114,17 +113,9 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 32),
           const Text('Raccourcis rapides', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: QuickActionCard(
-                  icon: Icons.my_location,
-                  label: 'Proche de moi',
-                  color: Colors.blue,
-                  onTap: () => Navigator.pushNamed(context, '/stations'),
-                ),
-              ),
-            ],
+          const Text(
+            'Accédez rapidement à vos itinéraires favoris et informations de voyage.',
+            style: TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 24),
           const LocationDisclaimer(),

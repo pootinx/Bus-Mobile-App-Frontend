@@ -94,16 +94,16 @@ class SignupScreen extends StatelessWidget {
                     const SizedBox(height: 30),
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          // Corrected the order of arguments to match the AuthService method signature.
-                          AuthService.to.createUserWithEmailAndPassword(
-                            emailController.text.trim(),
-                            passwordController.text.trim(),
-                            fullNameController.text.trim(),
-                          );
-                          // Removed the misleading SnackBar. AuthService now handles feedback.
-                        },
+                      child: Obx(() => ElevatedButton(
+                        onPressed: AuthService.to.isLoading.value 
+                          ? null 
+                          : () {
+                              AuthService.to.createUserWithEmailAndPassword(
+                                emailController.text.trim(),
+                                passwordController.text.trim(),
+                                fullNameController.text.trim(),
+                              );
+                            },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF005C97),
                           padding: const EdgeInsets.symmetric(vertical: 15),
@@ -111,9 +111,18 @@ class SignupScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8.0),
                           ),
                         ),
-                        child: const Text("Sign up",
-                            style: TextStyle(color: Colors.white)),
-                      ),
+                        child: AuthService.to.isLoading.value
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text("Sign up",
+                              style: TextStyle(color: Colors.white)),
+                      )),
                     ),
                     const SizedBox(height: 20),
                     Row(

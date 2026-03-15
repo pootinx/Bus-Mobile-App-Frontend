@@ -22,6 +22,36 @@ class RouteSummaryCard extends StatelessWidget {
     return Colors.blue;
   }
 
+  String _getRelativeTimeString(int timestampSeconds) {
+    if (timestampSeconds == 0) return '';
+    final now = DateTime.now().toUtc();
+    var departure = DateTime.fromMillisecondsSinceEpoch(timestampSeconds * 1000, isUtc: true);
+    var difference = departure.difference(now);
+
+    if (difference.isNegative) {
+      // If it's negative, we assume it's for the next day at the same time
+      // or we just show the countdown until that specific timestamp in the future.
+      // Usually, if the API gives a past timestamp, the user wants to see the next occurrence.
+      departure = departure.add(const Duration(days: 1));
+      difference = departure.difference(now);
+    }
+
+    if (difference.inMinutes < 1) {
+      return 'Imminent';
+    }
+
+    if (difference.inMinutes < 60) {
+      return 'Dans ${difference.inMinutes} min';
+    }
+
+    final hours = difference.inHours;
+    final mins = difference.inMinutes % 60;
+    if (mins == 0) {
+      return 'Dans $hours h';
+    }
+    return 'Dans $hours h $mins min';
+  }
+
   @override
   Widget build(BuildContext context) {
     final Leg leg = route.legs.first;
@@ -57,7 +87,7 @@ class RouteSummaryCard extends StatelessWidget {
                       const Icon(Icons.access_time, size: 18, color: Colors.grey),
                       const SizedBox(width: 8),
                       Text(
-                        '${leg.departureTime.text} - ${leg.arrivalTime.text}',
+                        _getRelativeTimeString(leg.departureTime.value),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -73,7 +103,7 @@ class RouteSummaryCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      leg.duration.text,
+                      leg.arrivalTime.text,
                       style: const TextStyle(
                         color: AppTheme.accentOrange,
                         fontWeight: FontWeight.bold,

@@ -95,15 +95,15 @@ class LoginScreen extends StatelessWidget {
                     const SizedBox(height: 30),
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          // The AuthService now handles all errors internally.
-                          // No need for a try-catch block here.
-                          AuthService.to.signInWithEmailAndPassword(
-                            emailController.text.trim(),
-                            passwordController.text.trim(),
-                          );
-                        },
+                      child: Obx(() => ElevatedButton(
+                        onPressed: AuthService.to.isLoading.value 
+                          ? null 
+                          : () {
+                              AuthService.to.signInWithEmailAndPassword(
+                                emailController.text.trim(),
+                                passwordController.text.trim(),
+                              );
+                            },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF005C97),
                           padding: const EdgeInsets.symmetric(vertical: 15),
@@ -111,9 +111,18 @@ class LoginScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(8.0),
                           ),
                         ),
-                        child: const Text("Login",
-                            style: TextStyle(color: Colors.white)),
-                      ),
+                        child: AuthService.to.isLoading.value
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text("Login",
+                              style: TextStyle(color: Colors.white)),
+                      )),
                     ),
                     const SizedBox(height: 20),
                     Row(

@@ -5,6 +5,7 @@ import 'package:bus_app/features/auth/presentation/pages/login_screen/login_scre
 import 'package:bus_app/features/auth/presentation/pages/verify_email_screen.dart';
 import 'package:bus_app/features/home/presentation/pages/main_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import 'profile_service.dart';
@@ -15,6 +16,9 @@ class AuthService extends GetxService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   late final Rx<User?> _firebaseUser;
   Timer? _emailVerificationTimer;
+
+  // Track authentication progress
+  final RxBool isLoading = false.obs;
 
   User? get firebaseUser => _firebaseUser.value;
 
@@ -64,6 +68,7 @@ class AuthService extends GetxService {
 
   Future<void> createUserWithEmailAndPassword(String email, String password, String fullName) async {
     try {
+      isLoading.value = true;
       UserCredential userCredential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
       if (userCredential.user != null) {
         // Create the user profile in Firestore.
@@ -73,20 +78,69 @@ class AuthService extends GetxService {
         // The `_setInitialScreen` listener will automatically navigate to VerifyEmailScreen.
       }
     } on FirebaseAuthException catch (e) {
-      Get.snackbar('Signup Failed', e.message ?? 'An unknown error occurred.');
+      String errorMessage = 'An unknown error occurred.';
+      if (e.code == 'email-already-in-use') {
+        errorMessage = 'Cet e-mail est déjà utilisé par un autre compte.';
+      } else if (e.code == 'weak-password') {
+        errorMessage = 'Le mot de passe est trop court.';
+      } else if (e.code == 'invalid-email') {
+        errorMessage = 'L\'adresse e-mail n\'est pas valide.';
+      } else if (e.message != null) {
+        errorMessage = e.message!;
+      }
+      
+      Get.snackbar(
+        'Erreur d\'inscription', 
+        errorMessage,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 4),
+      );
     } catch (e) {
-      Get.snackbar('Signup Failed', 'An unexpected error occurred.');
+      Get.snackbar(
+        'Erreur d\'inscription', 
+        'Une erreur inattendue s\'est produite.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+      );
+    } finally {
+      isLoading.value = false;
     }
   }
 
   Future<void> signInWithEmailAndPassword(String email, String password) async {
     try {
+      isLoading.value = true;
       await _auth.signInWithEmailAndPassword(email: email, password: password);
       // The `_setInitialScreen` listener will handle navigation based on verification status.
     } on FirebaseAuthException catch (e) {
-      Get.snackbar('Login Failed', e.message ?? 'An unknown error occurred.');
+      String errorMessage = 'An unknown error occurred.';
+      if (e.code == 'user-not-found' || e.code == 'wrong-password') {
+        errorMessage = 'E-mail ou mot de passe incorrect.';
+      } else if (e.message != null) {
+        errorMessage = e.message!;
+      }
+      
+      Get.snackbar(
+        'Erreur de connexion', 
+        errorMessage,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+        duration: const Duration(seconds: 4),
+      );
     } catch (e) {
-      Get.snackbar('Login Failed', 'An unexpected error occurred.');
+      Get.snackbar(
+        'Erreur de connexion', 
+        'Une erreur inattendue s\'est produite.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+      );
+    } finally {
+      isLoading.value = false;
     }
   }
 

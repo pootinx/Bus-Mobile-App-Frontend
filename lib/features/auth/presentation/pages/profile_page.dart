@@ -1,9 +1,9 @@
-
 import 'package:bus_app/features/auth/presentation/pages/edit_profile_page.dart';
 import 'package:bus_app/features/auth/services/auth_service.dart';
 import 'package:bus_app/features/auth/services/profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -48,7 +48,7 @@ class ProfilePage extends StatelessWidget {
                         height: 80,
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(40),
-                          child: Image.network("https://picsum.photos/200", fit: BoxFit.cover),
+                          child: Image.asset("assets/images/tobisma.png", fit: BoxFit.cover),
                         ),
                       ),
                       Positioned(
@@ -87,8 +87,16 @@ class ProfilePage extends StatelessWidget {
               const SizedBox(height: 30),
               const Text("Help & Support", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 10),
-              _buildProfileMenuItem(title: "Privacy policy", onTap: () {}, icon: Icons.arrow_forward_ios),
-              _buildProfileMenuItem(title: "Terms & Conditions", onTap: () {}, icon: Icons.arrow_forward_ios),
+               _buildProfileMenuItem(
+                  title: "Privacy policy", 
+                  onTap: () => _launchURL("https://softelligy.com/privacy-policy"), 
+                  icon: Icons.arrow_forward_ios
+               ),
+               _buildProfileMenuItem(
+                  title: "Terms & Conditions", 
+                  onTap: () => _launchURL("https://softelligy.com/terms"), 
+                  icon: Icons.arrow_forward_ios
+               ),
               const SizedBox(height: 20),
               ListTile(
                 title: const Text("Log out", style: TextStyle(color: Colors.red)),
@@ -108,5 +116,12 @@ class ProfilePage extends StatelessWidget {
       trailing: Icon(icon, size: 16),
       onTap: onTap,
     );
+  }
+
+  Future<void> _launchURL(String url) async {
+    final Uri uri = Uri.parse(url);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      debugPrint("Could not launch $url");
+    }
   }
 }

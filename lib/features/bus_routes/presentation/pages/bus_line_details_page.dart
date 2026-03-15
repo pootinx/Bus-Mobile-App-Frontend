@@ -128,30 +128,55 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
     return BitmapDescriptor.fromBytes(data!.buffer.asUint8List());
   }
 
+  double _parseCoordinate(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
   Future<void> _setupGoogleMapData(List<LatLng> polylinePoints, List<Map<String, dynamic>> stops) async {
-    // 1. Create Polyline
-    _polylines.add(Polyline(
-      polylineId: PolylineId(widget.lineData['route_name'] ?? 'line'),
-      points: polylinePoints,
-      color: lineColor,
-      width: 5,
-    ));
+    debugPrint("DEBUG: Setting up map data for ${stops.length} stops");
+    
+    final polyId = widget.lineData['route_name']?.toString() ?? 'line';
+    final Set<Polyline> newPolylines = {
+      Polyline(
+        polylineId: PolylineId(polyId),
+        points: polylinePoints,
+        color: lineColor,
+        width: 5,
+      )
+    };
 
-    // 2. Create Markers for stops
-    final BitmapDescriptor stopIcon = await _createDotMarkerBitmap(lineColor);
+    final Set<Marker> newMarkers = {};
 
+    // 2. Create Markers for stops (Only Start and End)
     for (int i = 0; i < stops.length; i++) {
       final stop = stops[i];
-      final lat = stop['latitude'] ?? 0.0;
-      final lng = stop['longitude'] ?? 0.0;
+      final isFirst = i == 0;
+      final isLast = i == stops.length - 1;
 
-      if (lat == 0.0 && lng == 0.0) continue;
+      if (!isFirst && !isLast) continue;
 
-      _markers.add(Marker(
-        markerId: MarkerId(stop['name'] ?? 'stop_$i'),
+      // Resilient coordinate checking
+      final double lat = _parseCoordinate(stop['latitude'] ?? stop['lat']);
+      final double lng = _parseCoordinate(stop['longitude'] ?? stop['lon'] ?? stop['lng']);
+
+      if (lat == 0.0 && lng == 0.0) {
+        debugPrint("DEBUG: Skipping stop $i (${stop['name']}) due to missing/zero coordinates. Full data: $stop");
+        continue;
+      }
+
+      newMarkers.add(Marker(
+        markerId: MarkerId("${stop['name']}_${i}_$polyId"),
         position: LatLng(lat, lng),
-        infoWindow: InfoWindow(title: stop['name']),
-        icon: stopIcon,
+        infoWindow: InfoWindow(
+          title: stop['name'] ?? 'Arrêt',
+          snippet: isFirst ? 'Départ' : isLast ? 'Terminus' : 'Arrêt de bus',
+        ),
+        icon: isFirst 
+            ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)
+            : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
       ));
     }
 
@@ -159,14 +184,98 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
     if (polylinePoints.isNotEmpty) {
       _initialCameraPosition = _calculateCenter(polylinePoints);
     } else if (stops.isNotEmpty) {
-      _initialCameraPosition = LatLng(stops.first['latitude'], stops.first['longitude']);
-    } else {
-      _initialCameraPosition = const LatLng(34.02, -6.83); // Fallback
+      final firstLat = _parseCoordinate(stops.first['latitude'] ?? stops.first['lat']);
+      final firstLng = _parseCoordinate(stops.first['longitude'] ?? stops.first['lon'] ?? stops.first['lng']);
+      _initialCameraPosition = LatLng(firstLat, firstLng);
     }
 
     if (mounted) {
-      setState(() {});
+      setState(() {
+        _polylines.clear();
+        _polylines.addAll(newPolylines);
+        _markers.clear();
+        _markers.addAll(newMarkers);
+      });
+      debugPrint("DEBUG: Map state updated with ${newMarkers.length} markers");
     }
+  }
+
+  void _showNearestArrivalTime(Map<String, dynamic> stop) {
+    debugPrint("DEBUG: Stop data keys - ${stop.keys.toList()}");
+    debugPrint("DEBUG: Stop data content - $stop");
+
+    final now = DateTime.now();
+    final currentTimeString = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+    
+    // Expand checks for multiple common keys
+    List<String> times = [];
+    final potentialTimeKeys = ['times', 'arrivalTime', 'arrival_time', 'time', 'departureTime', 'departure_time', 'startTime', 'start_time'];
+    
+    for (var key in potentialTimeKeys) {
+      if (stop[key] != null) {
+        if (stop[key] is List) {
+          times.addAll(List<String>.from(stop[key]));
+        } else {
+          times.add(stop[key].toString());
+        }
+        // If we found a list or non-empty string, we can stop looking
+        if (times.isNotEmpty) break;
+      }
+    }
+
+    String? nextTime;
+    if (times.isNotEmpty) {
+      times.sort();
+      for (var time in times) {
+        if (time.compareTo(currentTimeString) > 0) {
+          nextTime = time;
+          break;
+        }
+      }
+      // If no time today is after now, take the first one (for tomorrow)
+      nextTime ??= times.first;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(stop['name'] ?? 'Arrêt', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            if (nextTime != null) ...[
+              const Text("Prochain passage estimé :", style: TextStyle(color: Colors.grey)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.access_time, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  Text(nextTime, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue)),
+                ],
+              ),
+            ] else 
+              const Text("Aucun horaire disponible pour cet arrêt.", style: TextStyle(color: Colors.redAccent)),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: lineColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                child: const Text("Fermer"),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
   
   void _onMapCreated(GoogleMapController controller) {
@@ -240,7 +349,7 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: Text("Ligne $routeName"),
+        title: Text("$routeName"),
         backgroundColor: lineColor,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -323,7 +432,9 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
                         color: isFirst || isLast ? lineColor : Colors.black87,
                       ),
                     ),
-                    subtitle: Text(isFirst ? "Point de départ" : isLast ? "Terminus" : "", style: TextStyle(color: Colors.grey.shade600)),
+                    subtitle: Text(isFirst ? "Point de départ" : isLast ? "Terminus" : "Cliquez pour voir l'horaire", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                    trailing: const Icon(Icons.chevron_right, size: 16, color: Colors.grey),
+                    onTap: () => _showNearestArrivalTime(stop),
                   );
                 },
               ),
