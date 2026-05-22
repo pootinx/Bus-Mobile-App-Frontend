@@ -1,150 +1,232 @@
-
 import 'package:bus_app/features/auth/presentation/pages/signup_screen/signup_screen.dart';
 import 'package:bus_app/features/auth/services/auth_service.dart';
+import 'package:bus_app/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-class LoginScreen extends StatelessWidget {
+class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _obscureText = true.obs;
+  late final AnimationController _animController;
+  late final Animation<double> _slideAnim;
+  late final Animation<double> _fadeAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _slideAnim = Tween<double>(begin: 0.1, end: 1).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
+    );
+    _fadeAnim = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOut),
+    );
+    _animController.forward();
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _animController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final TextEditingController emailController = TextEditingController();
-    final TextEditingController passwordController = TextEditingController();
-    final RxBool obscureText = true.obs;
+    final isArabic = Get.locale?.languageCode == 'ar';
+    final font = isArabic ? GoogleFonts.ibmPlexSansArabic().fontFamily : null;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF005C97),
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.only(top: 100, left: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("Hello.",
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold)),
-                  Text("Welcome back!",
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 40),
-            Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(30),
-                  topRight: Radius.circular(30),
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 60),
+              FadeTransition(
+                opacity: _fadeAnim,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.05),
+                    end: Offset.zero,
+                  ).animate(_slideAnim),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 48, height: 48,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryBlue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(Icons.directions_bus_rounded,
+                            color: AppTheme.primaryBlue, size: 28),
+                      ),
+                      const SizedBox(height: 32),
+                      Text(
+                        isArabic ? 'مرحباً بعودتك' : 'Welcome back',
+                        style: TextStyle(
+                          fontSize: 32, fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                          fontFamily: font,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        isArabic ? 'سجل الدخول للمتابعة' : 'Sign in to continue',
+                        style: TextStyle(fontSize: 16, color: Colors.grey[500], fontFamily: font),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 20),
-                    const Text("Enter to your account",
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 30),
-                    TextFormField(
-                      controller: emailController,
-                      decoration: const InputDecoration(
-                        labelText: "E-mail",
-                        border: UnderlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.emailAddress,
-                    ),
-                    const SizedBox(height: 20),
-                    Obx(() => TextFormField(
-                          controller: passwordController,
-                          obscureText: obscureText.value,
+              const SizedBox(height: 48),
+              FadeTransition(
+                opacity: _fadeAnim,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.08),
+                    end: Offset.zero,
+                  ).animate(
+                    CurvedAnimation(parent: _animController, curve: const Interval(0.2, 1, curve: Curves.easeOutCubic)),
+                  ),
+                  child: Form(
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          style: TextStyle(fontFamily: font),
                           decoration: InputDecoration(
-                            labelText: "Password",
-                            border: const UnderlineInputBorder(),
+                            labelText: isArabic ? 'البريد الإلكتروني' : 'Email',
+                            prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.primaryBlue),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Obx(() => TextField(
+                          controller: _passwordController,
+                          obscureText: _obscureText.value,
+                          style: TextStyle(fontFamily: font),
+                          decoration: InputDecoration(
+                            labelText: isArabic ? 'كلمة المرور' : 'Password',
+                            prefixIcon: const Icon(Icons.lock_outlined, color: AppTheme.primaryBlue),
                             suffixIcon: IconButton(
-                              icon: Icon(obscureText.value
-                                  ? Icons.visibility_off
-                                  : Icons.visibility),
-                              onPressed: () {
-                                obscureText.value = !obscureText.value;
-                              },
+                              icon: Icon(
+                                _obscureText.value ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                color: Colors.grey,
+                              ),
+                              onPressed: () => _obscureText.value = !_obscureText.value,
                             ),
                           ),
                         )),
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () {
-                          // TODO: Implement forgot password
-                        },
-                        child: const Text("Forgot the password?",
-                            style: TextStyle(color: Colors.grey)),
-                      ),
-                    ),
-                    const SizedBox(height: 30),
-                    SizedBox(
-                      width: double.infinity,
-                      child: Obx(() => ElevatedButton(
-                        onPressed: AuthService.to.isLoading.value 
-                          ? null 
-                          : () {
-                              AuthService.to.signInWithEmailAndPassword(
-                                emailController.text.trim(),
-                                passwordController.text.trim(),
-                              );
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () {
+                              final email = _emailController.text.trim();
+                              if (email.isNotEmpty) {
+                                AuthService.to.sendPasswordResetEmail(email);
+                              }
                             },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF005C97),
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8.0),
+                            child: Text(
+                              isArabic ? 'نسيت كلمة المرور؟' : 'Forgot password?',
+                              style: TextStyle(color: AppTheme.primaryBlue, fontFamily: font),
+                            ),
                           ),
                         ),
-                        child: AuthService.to.isLoading.value
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Text("Login",
-                              style: TextStyle(color: Colors.white)),
-                      )),
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text("Don't have an account?"),
-                        TextButton(
-                          onPressed: () {
-                            Get.to(() => const SignupScreen());
-                          },
-                          child: const Text("Sign up",
-                              style: TextStyle(
-                                  color: Color(0xFF005C97),
-                                  fontWeight: FontWeight.bold)),
-                        ),
                       ],
-                    )
-                  ],
+                    ),
+                  ),
                 ),
               ),
-            )
-          ],
+              const SizedBox(height: 32),
+              FadeTransition(
+                opacity: _fadeAnim,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.1),
+                    end: Offset.zero,
+                  ).animate(
+                    CurvedAnimation(parent: _animController, curve: const Interval(0.4, 1, curve: Curves.easeOutCubic)),
+                  ),
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: Obx(() => ElevatedButton(
+                          onPressed: AuthService.to.isLoading.value
+                              ? null
+                              : () {
+                                  AuthService.to.signInWithEmailAndPassword(
+                                    _emailController.text.trim(),
+                                    _passwordController.text.trim(),
+                                  );
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryBlue,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: AuthService.to.isLoading.value
+                              ? const SizedBox(
+                                  width: 24, height: 24,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2.5,
+                                  ),
+                                )
+                              : Text(
+                                  isArabic ? 'تسجيل الدخول' : 'Sign In',
+                                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                                ),
+                        )),
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            isArabic ? 'ليس لديك حساب؟' : "Don't have an account?",
+                            style: TextStyle(color: Colors.grey[500], fontFamily: font),
+                          ),
+                          TextButton(
+                            onPressed: () => Get.to(() => const SignupScreen(), transition: Transition.rightToLeft),
+                            child: Text(
+                              isArabic ? 'إنشاء حساب' : 'Sign Up',
+                              style: TextStyle(
+                                color: AppTheme.primaryBlue,
+                                fontWeight: FontWeight.w600,
+                                fontFamily: font,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

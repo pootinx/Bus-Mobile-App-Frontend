@@ -8,7 +8,6 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Function to read the key.properties file
 fun readKeystoreProperties(): Properties {
     val properties = Properties()
     val keystorePropertiesFile = rootProject.file("key.properties")
@@ -18,11 +17,14 @@ fun readKeystoreProperties(): Properties {
     return properties
 }
 
+val localMinSdk = 24
+val localCompileSdk = 35
+val localTargetSdk = 35
+
 android {
     namespace = "com.softelligy.tobis"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = localCompileSdk
 
-    // ✅ Fix du NDK version
     ndkVersion = "27.0.12077973"
 
     val keystoreProperties = readKeystoreProperties()
@@ -39,6 +41,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -49,10 +52,11 @@ android {
 
     defaultConfig {
         applicationId = "com.softelligy.tobis"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = localMinSdk
+        targetSdk = localTargetSdk
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -64,4 +68,9 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation("androidx.multidex:multidex:2.0.1")
 }

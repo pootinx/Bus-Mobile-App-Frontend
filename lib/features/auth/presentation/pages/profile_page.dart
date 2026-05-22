@@ -1,107 +1,182 @@
-import 'package:bus_app/features/auth/presentation/pages/edit_profile_page.dart';
-import 'package:bus_app/features/auth/services/auth_service.dart';
-import 'package:bus_app/features/auth/services/profile_service.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:url_launcher/url_launcher.dart';
-
+import 'package:bus_app/features/auth/services/auth_service.dart';
+import 'package:bus_app/features/auth/services/profile_service.dart';
+import 'package:bus_app/core/theme/app_theme.dart';
+import 'package:bus_app/features/notifications/presentation/pages/notifications_page.dart';
+import 'package:bus_app/core/controllers/theme_controller.dart';
+import 'package:bus_app/core/services/localization_service.dart';
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Get the services.
-    final profileService = ProfileService.to;
-    final authService = AuthService.to;
+    final profileService = Get.find<ProfileService>();
+    final authService = Get.find<AuthService>();
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        title: const Text(
-          "Profile",
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Profile'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_outlined),
+            onPressed: () => Get.to(() => const NotificationsPage()),
+          ),
+        ],
       ),
       body: Obx(() {
-        // Reactively listen to the user model from the ProfileService.
-        final userModel = profileService.user;
-
-        // If the user model is null, it means we are either logging out or the data
-        // hasn't been loaded yet. A loading spinner is a safe default.
-        if (userModel == null) {
+        final profile = profileService.user;
+        if (profile == null) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        // If we have a user, build the profile view.
         return SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+          padding: const EdgeInsets.all(20),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Stack(
-                    children: [
-                      SizedBox(
-                        width: 80,
-                        height: 80,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(40),
-                          child: Image.asset("assets/images/tobisma.png", fit: BoxFit.cover),
-                        ),
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(15),
-                            color: Colors.blue,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.white, size: 15),
-                            onPressed: () => Get.to(() => const EditProfilePage()),
-                          ),
-                        ),
-                      ),
-                    ],
+              // Avatar
+              CircleAvatar(
+                radius: 48,
+                backgroundColor: AppTheme.primaryBlue.withOpacity(0.1),
+                child: Text(
+                  _getInitials(profile.fullName),
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    color: AppTheme.primaryBlue,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const SizedBox(width: 20),
-                  Column(
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(profile.fullName, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+              Text(profile.email, style: TextStyle(color: Colors.grey[600])),
+              const SizedBox(height: 24),
+
+              // Info Card
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(userModel.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                      Text(userModel.email),
+                      Text('Personal Info', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                      const Divider(),
+                      _infoRow(Icons.phone, 'Phone', profile.phone.isEmpty ? 'Not set' : profile.phone),
+                      _infoRow(Icons.wc, 'Gender', profile.gender.isEmpty ? 'Not set' : profile.gender),
+                      _infoRow(Icons.cake, 'Age', profile.age > 0 ? '${profile.age}' : 'Not set'),
+                      _infoRow(Icons.work, 'Status', profile.professionalStatus.isEmpty ? 'Not set' : profile.professionalStatus),
+                      _infoRow(Icons.location_city, 'City', profile.city.isEmpty ? 'Not set' : profile.city),
                     ],
                   ),
-                ],
+                ),
               ),
-              const SizedBox(height: 30),
-              const Text("Account settings", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 10),
-              _buildProfileMenuItem(title: "Personal information", onTap: () {}, icon: Icons.arrow_forward_ios),
-              _buildProfileMenuItem(title: "Notifications", onTap: () {}, icon: Icons.arrow_forward_ios),
-              const SizedBox(height: 30),
-              const Text("Help & Support", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 10),
-               _buildProfileMenuItem(
-                  title: "Privacy policy", 
-                  onTap: () => _launchURL("https://softelligy.com/privacy-policy"), 
-                  icon: Icons.arrow_forward_ios
-               ),
-               _buildProfileMenuItem(
-                  title: "Terms & Conditions", 
-                  onTap: () => _launchURL("https://softelligy.com/terms"), 
-                  icon: Icons.arrow_forward_ios
-               ),
-              const SizedBox(height: 20),
-              ListTile(
-                title: const Text("Log out", style: TextStyle(color: Colors.red)),
-                // Call the signOut method from the AuthService.
-                onTap: () => authService.signOut(),
+              const SizedBox(height: 12),
+
+              // Stats Card
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Account', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                      const Divider(),
+                      _infoRow(Icons.check_circle, 'Onboarding', profile.onboardingCompleted ? 'Completed' : 'Pending'),
+                      _infoRow(Icons.verified_user, 'Email Verified', authService.firebaseUser?.emailVerified == true ? 'Yes' : 'No'),
+                      if (profile.createdAt != null)
+                        _infoRow(Icons.calendar_today, 'Joined', _formatDate(profile.createdAt!)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Settings Card
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Settings', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                      const Divider(),
+                      
+                      // Dark Mode Toggle
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.dark_mode, size: 20, color: Colors.grey[500]),
+                                const SizedBox(width: 12),
+                                Text('Dark Mode', style: TextStyle(color: Colors.grey[600])),
+                              ],
+                            ),
+                            Obx(() {
+                              final themeController = Get.find<ThemeController>();
+                              return Switch(
+                                value: themeController.isDarkMode,
+                                onChanged: (val) {
+                                  themeController.toggleTheme();
+                                },
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                      
+                      // Language Selector
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.language, size: 20, color: Colors.grey[500]),
+                                const SizedBox(width: 12),
+                                Text('Language', style: TextStyle(color: Colors.grey[600])),
+                              ],
+                            ),
+                            Obx(() {
+                              final locService = Get.find<LocalizationService>();
+                              return DropdownButton<String>(
+                                value: locService.currentLocale.languageCode,
+                                underline: const SizedBox(),
+                                items: const [
+                                  DropdownMenuItem(value: 'en', child: Text('English')),
+                                  DropdownMenuItem(value: 'fr', child: Text('Français')),
+                                  DropdownMenuItem(value: 'ar', child: Text('العربية')),
+                                ],
+                                onChanged: (val) {
+                                  if (val != null) {
+                                    locService.updateLocale(val);
+                                  }
+                                },
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Logout
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => authService.signOut(),
+                  icon: const Icon(Icons.logout, color: Colors.red),
+                  label: const Text('Logout', style: TextStyle(color: Colors.red)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
               ),
             ],
           ),
@@ -110,18 +185,28 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _buildProfileMenuItem({required String title, required VoidCallback onTap, IconData? icon}) {
-    return ListTile(
-      title: Text(title),
-      trailing: Icon(icon, size: 16),
-      onTap: onTap,
+  Widget _infoRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Colors.grey[500]),
+          const SizedBox(width: 12),
+          SizedBox(width: 100, child: Text(label, style: TextStyle(color: Colors.grey[600]))),
+          Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500))),
+        ],
+      ),
     );
   }
 
-  Future<void> _launchURL(String url) async {
-    final Uri uri = Uri.parse(url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      debugPrint("Could not launch $url");
-    }
+  String _getInitials(String name) {
+    if (name.isEmpty) return '?';
+    final parts = name.split(' ');
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    return name[0].toUpperCase();
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
   }
 }

@@ -1,9 +1,13 @@
-
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:bus_app/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:bus_app/core/services/google_directions_service.dart';
+import 'package:get/get.dart';
+import 'package:intl/intl.dart';
 
 class BusLineDetailsPage extends StatefulWidget {
   final Map<String, dynamic> lineData;
@@ -27,6 +31,12 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
   LatLng? currentLocation;
   StreamSubscription<Position>? _positionStream;
   bool _isFollowingLocation = false;
+  
+  // Custom UI state
+  int? _expandedIndex;
+  final GoogleDirectionsService _directionsService = GoogleDirectionsService();
+  final Map<int, List<DateTime>> _stopArrivals = {};
+  final Map<int, bool> _isLoadingArrivals = {};
 
   @override
   void initState() {
@@ -36,16 +46,16 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
 
   Future<void> _init() async {
     final data = widget.lineData;
-    final List<LatLng> polylinePoints = _decodePolyline(data['polyline']);
+    final List<LatLng> polylinePoints = _decodePolyline(data['polyline'] ?? '');
     stops = List<Map<String, dynamic>>.from(data['stops'] ?? []);
 
-    // Determine line color (same as before)
+    // Determine line color
     if (data['color_final'] != null && data['color_final'] is Color) {
       lineColor = data['color_final'];
     } else if (data['color'] != null && data['color'] is String) {
       lineColor = _hexToColor(data['color']);
     } else {
-      lineColor = Colors.blue;
+      lineColor = AppTheme.primaryBlue;
     }
 
     await _setupGoogleMapData(polylinePoints, stops);
@@ -55,10 +65,11 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
   @override
   void dispose() {
     _positionStream?.cancel();
+    _mapController?.dispose();
     super.dispose();
   }
 
-  // --- Location Methods (adapted for Google Maps) ---
+  // --- Location and Map Methods ---
 
   Future<void> _initializeLocation() async {
     if (await Geolocator.isLocationServiceEnabled()) {
@@ -101,92 +112,53 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
       );
     }
   }
-  
-  // --- Map Setup and Control Methods for Google Maps ---
-
-  Future<BitmapDescriptor> _createDotMarkerBitmap(Color color) async {
-    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
-    final Canvas canvas = Canvas(pictureRecorder);
-    final Paint paint = Paint()..color = color;
-    const double radius = 20.0;
-
-    canvas.drawCircle(
-      const Offset(radius, radius),
-      radius,
-      paint,
-    );
-
-    paint.color = Colors.white;
-    canvas.drawCircle(
-      const Offset(radius, radius),
-      radius - 5,
-      paint,
-    );
-
-    final img = await pictureRecorder.endRecording().toImage(radius.toInt() * 2, radius.toInt() * 2);
-    final data = await img.toByteData(format: ui.ImageByteFormat.png);
-    return BitmapDescriptor.fromBytes(data!.buffer.asUint8List());
-  }
-
-  double _parseCoordinate(dynamic value) {
-    if (value == null) return 0.0;
-    if (value is num) return value.toDouble();
-    if (value is String) return double.tryParse(value) ?? 0.0;
-    return 0.0;
-  }
 
   Future<void> _setupGoogleMapData(List<LatLng> polylinePoints, List<Map<String, dynamic>> stops) async {
-    debugPrint("DEBUG: Setting up map data for ${stops.length} stops");
-    
     final polyId = widget.lineData['route_name']?.toString() ?? 'line';
     final Set<Polyline> newPolylines = {
       Polyline(
         polylineId: PolylineId(polyId),
         points: polylinePoints,
         color: lineColor,
-        width: 5,
+        width: 6,
+        jointType: JointType.round,
+        startCap: Cap.roundCap,
+        endCap: Cap.roundCap,
       )
     };
 
     final Set<Marker> newMarkers = {};
+    
+    // Generate custom premium markers
+    final startMarkerIcon = await _getDotMarker(Colors.green);
+    final endMarkerIcon = await _getDotMarker(Colors.red);
+    final intermediateMarkerIcon = await _getDotMarker(lineColor, size: 40.0, radius: 10.0, strokeWidth: 3.0);
 
-    // 2. Create Markers for stops (Only Start and End)
     for (int i = 0; i < stops.length; i++) {
-      final stop = stops[i];
-      final isFirst = i == 0;
-      final isLast = i == stops.length - 1;
-
-      if (!isFirst && !isLast) continue;
-
-      // Resilient coordinate checking
-      final double lat = _parseCoordinate(stop['latitude'] ?? stop['lat']);
-      final double lng = _parseCoordinate(stop['longitude'] ?? stop['lon'] ?? stop['lng']);
-
-      if (lat == 0.0 && lng == 0.0) {
-        debugPrint("DEBUG: Skipping stop $i (${stop['name']}) due to missing/zero coordinates. Full data: $stop");
-        continue;
-      }
-
-      newMarkers.add(Marker(
-        markerId: MarkerId("${stop['name']}_${i}_$polyId"),
-        position: LatLng(lat, lng),
-        infoWindow: InfoWindow(
-          title: stop['name'] ?? 'Arrêt',
-          snippet: isFirst ? 'Départ' : isLast ? 'Terminus' : 'Arrêt de bus',
-        ),
-        icon: isFirst 
-            ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen)
-            : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-      ));
+        final stop = stops[i];
+        final double lat = _parseCoordinate(stop['latitude'] ?? stop['lat']);
+        final double lng = _parseCoordinate(stop['longitude'] ?? stop['lon'] ?? stop['lng']);
+        
+        if (lat != 0.0 || lng != 0.0) {
+            BitmapDescriptor icon = intermediateMarkerIcon;
+            if (i == 0) {
+                icon = startMarkerIcon;
+            } else if (i == stops.length - 1) {
+                icon = endMarkerIcon;
+            }
+            
+            newMarkers.add(Marker(
+                markerId: MarkerId("${stop['name']}_$i"),
+                position: LatLng(lat, lng),
+                icon: icon,
+                anchor: const Offset(0.5, 0.5),
+                infoWindow: InfoWindow(title: stop['name']),
+            ));
+        }
     }
 
-    // 3. Set Initial Camera Position
     if (polylinePoints.isNotEmpty) {
       _initialCameraPosition = _calculateCenter(polylinePoints);
-    } else if (stops.isNotEmpty) {
-      final firstLat = _parseCoordinate(stops.first['latitude'] ?? stops.first['lat']);
-      final firstLng = _parseCoordinate(stops.first['longitude'] ?? stops.first['lon'] ?? stops.first['lng']);
-      _initialCameraPosition = LatLng(firstLat, firstLng);
     }
 
     if (mounted) {
@@ -196,88 +168,13 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
         _markers.clear();
         _markers.addAll(newMarkers);
       });
-      debugPrint("DEBUG: Map state updated with ${newMarkers.length} markers");
+      // Center the map now that polylines are populated
+      if (_mapController != null) {
+        _centerOnRoute();
+      }
     }
   }
 
-  void _showNearestArrivalTime(Map<String, dynamic> stop) {
-    debugPrint("DEBUG: Stop data keys - ${stop.keys.toList()}");
-    debugPrint("DEBUG: Stop data content - $stop");
-
-    final now = DateTime.now();
-    final currentTimeString = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
-    
-    // Expand checks for multiple common keys
-    List<String> times = [];
-    final potentialTimeKeys = ['times', 'arrivalTime', 'arrival_time', 'time', 'departureTime', 'departure_time', 'startTime', 'start_time'];
-    
-    for (var key in potentialTimeKeys) {
-      if (stop[key] != null) {
-        if (stop[key] is List) {
-          times.addAll(List<String>.from(stop[key]));
-        } else {
-          times.add(stop[key].toString());
-        }
-        // If we found a list or non-empty string, we can stop looking
-        if (times.isNotEmpty) break;
-      }
-    }
-
-    String? nextTime;
-    if (times.isNotEmpty) {
-      times.sort();
-      for (var time in times) {
-        if (time.compareTo(currentTimeString) > 0) {
-          nextTime = time;
-          break;
-        }
-      }
-      // If no time today is after now, take the first one (for tomorrow)
-      nextTime ??= times.first;
-    }
-
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(stop['name'] ?? 'Arrêt', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            if (nextTime != null) ...[
-              const Text("Prochain passage estimé :", style: TextStyle(color: Colors.grey)),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(Icons.access_time, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Text(nextTime, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue)),
-                ],
-              ),
-            ] else 
-              const Text("Aucun horaire disponible pour cet arrêt.", style: TextStyle(color: Colors.redAccent)),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: lineColor,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                child: const Text("Fermer"),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-  
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
     _centerOnRoute();
@@ -286,17 +183,393 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
   void _centerOnRoute() {
     if (_mapController == null || _polylines.isEmpty) return;
     final bounds = _calculateBounds(_polylines.first.points);
-    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60.0));
+    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80.0));
   }
 
-  void _centerOnMyLocation() {
-    if (currentLocation != null) {
-      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(currentLocation!, 15));
-      setState(() { _isFollowingLocation = true; });
+  // --- Build Methods ---
+
+  @override
+  Widget build(BuildContext context) {
+    final routeName = widget.lineData['route_name'] ?? 'Inconnue';
+    final start = stops.isNotEmpty ? stops.first['name'] ?? '...' : '...';
+    final end = stops.isNotEmpty ? stops.last['name'] ?? '...' : '...';
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      backgroundColor: isDark ? AppTheme.darkBg : AppTheme.lightBg,
+      body: CustomScrollView(
+        slivers: [
+          // Premium SliverAppBar with Map
+          SliverAppBar(
+            expandedHeight: 320,
+            pinned: true,
+            stretch: true,
+            backgroundColor: lineColor,
+            leading: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: CircleAvatar(
+                backgroundColor: Colors.white24,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                  onPressed: () => Get.back(),
+                ),
+              ),
+            ),
+            flexibleSpace: FlexibleSpaceBar(
+              background: GoogleMap(
+                mapType: MapType.normal,
+                initialCameraPosition: CameraPosition(
+                  target: _initialCameraPosition ?? const LatLng(34.02, -6.83),
+                  zoom: 12,
+                ),
+                onMapCreated: _onMapCreated,
+                polylines: _polylines,
+                markers: _markers,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                mapToolbarEnabled: false,
+              ),
+            ),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: CircleAvatar(
+                  backgroundColor: Colors.white24,
+                  child: IconButton(
+                    icon: const Icon(Icons.center_focus_strong, color: Colors.white, size: 20),
+                    onPressed: _centerOnRoute,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          // Route Overview Panel
+          SliverToBoxAdapter(
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: isDark ? AppTheme.darkSurface : Colors.white,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(32)),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, 10)),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(color: lineColor, borderRadius: BorderRadius.circular(8)),
+                        child: Text(routeName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          "$start → $end",
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildInfoItem(Icons.location_on_outlined, "${stops.length} Arrêts"),
+                      _buildInfoItem(Icons.timer_outlined, "Freq. 15 min"),
+                      _buildInfoItem(Icons.directions_bus_outlined, "Actif"),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Timeline Stops List
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final stop = stops[index];
+                  final isExpanded = _expandedIndex == index;
+                  
+                  return _buildTimelineStop(index, stop, isExpanded);
+                },
+                childCount: stops.length,
+              ),
+            ),
+          ),
+          
+          const SliverToBoxAdapter(child: SizedBox(height: 80)),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _centerOnRoute,
+        label: const Text("Rafraîchir"),
+        icon: const Icon(Icons.refresh),
+        backgroundColor: lineColor,
+        foregroundColor: Colors.white,
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(IconData icon, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.grey),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+      ],
+    );
+  }
+
+  Widget _buildTimelineStop(int index, Map<String, dynamic> stop, bool isExpanded) {
+    final isFirst = index == 0;
+    final isLast = index == stops.length - 1;
+    final name = stop['name'] ?? 'Arrêt';
+
+    return GestureDetector(
+      onTap: () async {
+        if (!isExpanded) {
+          _fetchArrivalTimes(index, stop);
+        }
+        setState(() {
+          _expandedIndex = isExpanded ? null : index;
+        });
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: IntrinsicHeight(
+          child: Row(
+            children: [
+              // Timeline line and dot
+              Column(
+                children: [
+                  Expanded(child: Container(width: 2, color: isFirst ? Colors.transparent : lineColor.withOpacity(0.3))),
+                  Container(
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: isFirst || isLast ? lineColor : Colors.white,
+                      border: Border.all(color: lineColor, width: 2),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  Expanded(child: Container(width: 2, color: isLast ? Colors.transparent : lineColor.withOpacity(0.3))),
+                ],
+              ),
+              const SizedBox(width: 20),
+              // Stop Content
+              Expanded(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isExpanded ? lineColor.withOpacity(0.05) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              name,
+                              style: TextStyle(
+                                fontWeight: isFirst || isLast ? FontWeight.bold : FontWeight.w500,
+                                fontSize: 16,
+                                color: isFirst || isLast ? lineColor : null,
+                              ),
+                            ),
+                          ),
+                          Icon(isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 20, color: Colors.grey),
+                        ],
+                      ),
+                      if (isExpanded) ...[
+                        const SizedBox(height: 12),
+                        const Text("Prochains passages :", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        const SizedBox(height: 8),
+                        if (_isLoadingArrivals[index] ?? false)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8.0),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else if (_stopArrivals[index]?.isNotEmpty ?? false)
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: _stopArrivals[index]!
+                                  .map((dt) => _buildRelativeTimeBadge(dt))
+                                  .toList(),
+                            ),
+                          )
+                        else if (isExpanded)
+                          const Text("Aucun passage trouvé", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeBadge(String time, bool isNext) {
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: isNext ? lineColor : lineColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        time,
+        style: TextStyle(
+          color: isNext ? Colors.white : lineColor,
+          fontWeight: FontWeight.bold,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRelativeTimeBadge(DateTime departureTime) {
+    final now = DateTime.now();
+    final difference = departureTime.difference(now);
+    final minutes = difference.inMinutes;
+    String label;
+    bool isNext = false;
+
+    if (minutes < 1) {
+      label = "Imminent";
+      isNext = true;
+    } else if (minutes < 60) {
+      label = "Dans $minutes min";
+      if (minutes < 10) isNext = true;
+    } else {
+      final hours = difference.inHours;
+      final remainingMinutes = minutes % 60;
+      if (hours < 24) {
+        label = "Dans ${hours}h ${remainingMinutes}min";
+      } else {
+        label = DateFormat('HH:mm').format(departureTime);
+      }
+    }
+
+    return _buildTimeBadge(label, isNext);
+  }
+
+  Future<BitmapDescriptor> _getDotMarker(Color color, {double size = 60.0, double radius = 18.0, double strokeWidth = 5.0}) async {
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+
+    // Shadow
+    final Paint shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(0.25)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.0);
+    canvas.drawCircle(Offset(size / 2, size / 2 + 2), radius + 2, shadowPaint);
+
+    // White Border
+    final Paint borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(size / 2, size / 2), radius + strokeWidth / 2, borderPaint);
+
+    // Main Dot
+    final Paint dotPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(size / 2, size / 2), radius - strokeWidth / 2, dotPaint);
+
+    final ui.Image image = await pictureRecorder.endRecording().toImage(size.toInt(), size.toInt());
+    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
+  }
+
+  Future<void> _fetchArrivalTimes(int index, Map<String, dynamic> stop) async {
+    if (_isLoadingArrivals[index] == true) return;
+
+    setState(() {
+      _isLoadingArrivals[index] = true;
+    });
+
+    try {
+      final double lat = _parseCoordinate(stop['latitude'] ?? stop['lat']);
+      final double lng = _parseCoordinate(stop['longitude'] ?? stop['lon'] ?? stop['lng']);
+      
+      // Use terminus as destination
+      final terminus = stops.last;
+      final double destLat = _parseCoordinate(terminus['latitude'] ?? terminus['lat']);
+      final double destLng = _parseCoordinate(terminus['longitude'] ?? terminus['lon'] ?? terminus['lng']);
+
+      final result = await _directionsService.getBusDirections(
+        LatLng(lat, lng),
+        LatLng(destLat, destLng),
+      );
+
+      final List<DateTime> arrivalTimes = [];
+      if (result['routes'] != null) {
+        for (var route in result['routes']) {
+          for (var leg in route['legs']) {
+            for (var step in leg['steps']) {
+              if (step['travel_mode'] == 'TRANSIT' && step['transit_details'] != null) {
+                final details = step['transit_details'];
+                // Optional: Check if the line name matches
+                // final lineName = details['line']?['short_name'] ?? details['line']?['name'];
+                
+                final departureTimeValue = details['departure_time']?['value'];
+                if (departureTimeValue != null) {
+                  arrivalTimes.add(DateTime.fromMillisecondsSinceEpoch(departureTimeValue * 1000));
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Sort and take next 3
+      arrivalTimes.sort();
+      final now = DateTime.now();
+      final upcoming = arrivalTimes.where((dt) => dt.isAfter(now)).take(3).toList();
+
+      if (mounted) {
+        setState(() {
+          _stopArrivals[index] = upcoming;
+          _isLoadingArrivals[index] = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching arrival times: $e");
+      if (mounted) {
+        setState(() {
+          _isLoadingArrivals[index] = false;
+        });
+      }
     }
   }
 
-  // --- Helper and Utility Functions ---
+  // --- Helpers ---
+
+  double _parseCoordinate(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
 
   List<LatLng> _decodePolyline(String encoded) {
     List<LatLng> points = [];
@@ -312,7 +585,7 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
     }
     return points;
   }
-  
+
   LatLngBounds _calculateBounds(List<LatLng> points) {
     final lats = points.map((p) => p.latitude);
     final lngs = points.map((p) => p.longitude);
@@ -335,139 +608,5 @@ class _BusLineDetailsPageState extends State<BusLineDetailsPage> {
     hex = hex.replaceAll("#", "");
     if (hex.length == 6) hex = "FF$hex";
     return Color(int.parse(hex, radix: 16));
-  }
-
-  // --- Build Method ---
-
-  @override
-  Widget build(BuildContext context) {
-    final routeName = widget.lineData['route_name'] ?? 'Inconnue';
-    final isDotted = widget.lineData['type'] == 'intermittente';
-    final start = stops.isNotEmpty ? stops.first['name'] ?? '...' : '...';
-    final end = stops.isNotEmpty ? stops.last['name'] ?? '...' : '...';
-
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        title: Text("$routeName"),
-        backgroundColor: lineColor,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          if (currentLocation != null) IconButton(icon: const Icon(Icons.my_location), onPressed: _centerOnMyLocation, tooltip: 'Ma position'),
-          IconButton(icon: const Icon(Icons.route), onPressed: _centerOnRoute, tooltip: 'Centrer sur la ligne'),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Map Container - Now using GoogleMap
-          SizedBox(
-            height: 280,
-            child: GoogleMap(
-              mapType: MapType.normal,
-              initialCameraPosition: CameraPosition(
-                target: _initialCameraPosition ?? const LatLng(34.02, -6.83),
-                zoom: 12,
-              ),
-              onMapCreated: _onMapCreated,
-              polylines: _polylines,
-              markers: _markers,
-              myLocationEnabled: false, // Custom location marker is used
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: true,
-            ),
-          ),
-
-          // Route Info Panel (UI remains the same)
-          Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [lineColor, lineColor.withOpacity(0.8)],
-                begin: Alignment.topLeft, end: Alignment.bottomRight
-              ),
-            ),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  const Icon(Icons.route, color: Colors.white, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text("$start → $end", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))),
-                ]),
-                const SizedBox(height: 8),
-                Row(children: [
-                  const Icon(Icons.location_on, color: Colors.white70, size: 16),
-                  const SizedBox(width: 4),
-                  Text("${stops.length} arrêts", style: const TextStyle(color: Colors.white70, fontSize: 14)),
-                  const SizedBox(width: 20),
-                  Icon(isDotted ? Icons.more_horiz : Icons.timeline, color: Colors.white70, size: 16),
-                  const SizedBox(width: 4),
-                  Text(isDotted ? "Intermittente" : "Continue", style: const TextStyle(color: Colors.white70, fontSize: 14)),
-                ]),
-              ],
-            ),
-          ),
-
-          // Stops List (UI remains the same)
-          Expanded(
-            child: Container(
-              color: Colors.white,
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: stops.length,
-                itemBuilder: (context, index) {
-                  final stop = stops[index];
-                  final name = stop['name'] ?? 'Inconnu';
-                  final isFirst = index == 0;
-                  final isLast = index == stops.length - 1;
-
-                  return ListTile(
-                    leading: _buildStopIndicator(index, stops.length, lineColor),
-                    title: Text(
-                      name,
-                      style: TextStyle(
-                        fontWeight: isFirst || isLast ? FontWeight.bold : FontWeight.normal,
-                        color: isFirst || isLast ? lineColor : Colors.black87,
-                      ),
-                    ),
-                    subtitle: Text(isFirst ? "Point de départ" : isLast ? "Terminus" : "Cliquez pour voir l'horaire", style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                    trailing: const Icon(Icons.chevron_right, size: 16, color: Colors.grey),
-                    onTap: () => _showNearestArrivalTime(stop),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Helper for drawing the list view timeline
-  Widget _buildStopIndicator(int index, int stopCount, Color color) {
-    return SizedBox(
-      width: 30,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (index > 0) Expanded(child: Container(width: 2, color: color.withOpacity(0.3))),
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: color, width: 2),
-              color: (index == 0 || index == stopCount -1) ? color : Colors.white,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              (index == 0) ? Icons.play_arrow : (index == stopCount -1) ? Icons.stop : Icons.circle,
-              color: (index == 0 || index == stopCount -1) ? Colors.white : color,
-              size: 14,
-            ),
-          ),
-          if (index < stopCount - 1) Expanded(child: Container(width: 2, color: color.withOpacity(0.3))),
-        ],
-      ),
-    );
   }
 }

@@ -1,9 +1,12 @@
-
 import 'package:bus_app/features/bus_routes/presentation/pages/bus_lines_page.dart';
-import 'package:bus_app/features/search/presentation/pages/search_page.dart';
+import 'package:bus_app/features/home/presentation/pages/home_page.dart';
 import 'package:bus_app/features/t_pass/presentation/pages/t_pass_page.dart';
 import 'package:bus_app/features/auth/presentation/pages/profile_page.dart';
+import 'package:bus_app/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:bus_app/l10n/app_localizations.dart';
+
+import 'package:animations/animations.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -12,14 +15,14 @@ class MainPage extends StatefulWidget {
   State<MainPage> createState() => _MainPageState();
 }
 
-class _MainPageState extends State<MainPage> {
+class _MainPageState extends State<MainPage> with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
 
   final List<Widget> _screens = [
-    const SearchPage(), // Tab 1: Itinéraires (with From/To)
-    const TPassPage(), // Tab 2: T-PASS
-    const BusLinesPage(), // Tab 3: Lignes
-    const ProfilePage(), // Tab 4: Profile
+    const HomePage(),
+    const TPassPage(),
+    const BusLinesPage(),
+    const ProfilePage(),
   ];
 
   void _onTabTapped(int index) {
@@ -30,22 +33,46 @@ class _MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
+      body: PageTransitionSwitcher(
+        duration: const Duration(milliseconds: 300),
+        transitionBuilder: (child, primaryAnimation, secondaryAnimation) {
+          return FadeThroughTransition(
+            animation: primaryAnimation,
+            secondaryAnimation: secondaryAnimation,
+            child: child,
+          );
+        },
+        child: _screens[_currentIndex],
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: _onTabTapped,
-        selectedItemColor: const Color(0xFF1E3A8A),
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Itinéraires'),
-          BottomNavigationBarItem(icon: Icon(Icons.credit_card), label: 'T-PASS'),
-          BottomNavigationBarItem(icon: Icon(Icons.directions_bus), label: 'Lignes'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: _onTabTapped,
+        elevation: 8,
+        shadowColor: Colors.black.withOpacity(0.1),
+        destinations: [
+          NavigationDestination(
+            icon: const Icon(Icons.search_rounded),
+            selectedIcon: const Icon(Icons.search_rounded, size: 28, color: AppTheme.primaryBlue),
+            label: l10n.itineraries,
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.credit_card_outlined),
+            selectedIcon: const Icon(Icons.credit_card_rounded, size: 28, color: AppTheme.primaryBlue),
+            label: l10n.tPass,
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.directions_bus_outlined),
+            selectedIcon: const Icon(Icons.directions_bus_rounded, size: 28, color: AppTheme.primaryBlue),
+            label: l10n.lines,
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.person_outline_rounded),
+            selectedIcon: const Icon(Icons.person_rounded, size: 28, color: AppTheme.primaryBlue),
+            label: l10n.profile,
+          ),
         ],
       ),
     );

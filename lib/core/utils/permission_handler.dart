@@ -3,6 +3,11 @@ import 'package:flutter/material.dart';
 import '../../features/map/presentation/widgets/location_disclosure_dialog.dart';
 
 class PermissionHandler {
+  static Future<bool> checkLocationStatus() async {
+    final permission = await Geolocator.checkPermission();
+    return permission == LocationPermission.always || permission == LocationPermission.whileInUse;
+  }
+
   /// Checks and requests location permission with a prominent disclosure.
   static Future<bool> handleLocationPermission(BuildContext context) async {
     bool serviceEnabled;

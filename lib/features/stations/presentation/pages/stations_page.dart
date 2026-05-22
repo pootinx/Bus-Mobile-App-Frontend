@@ -1,12 +1,12 @@
 
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'dart:math' as math;
-import 'package:bus_app/features/bus_routes/presentation/pages/bus_line_details_page.dart';
 import 'package:bus_app/core/services/location_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:bus_app/core/utils/permission_handler.dart';
@@ -68,8 +68,8 @@ class _StationsPageState extends State<StationsPage> with TickerProviderStateMix
       setState(() {
         userLocation = latLng;
         locationPermissionDenied = false;
-        _updateMarkers();
       });
+      await _updateMarkers();
 
       _mapController?.animateCamera(CameraUpdate.newLatLngZoom(latLng, 14));
 
@@ -164,9 +164,9 @@ class _StationsPageState extends State<StationsPage> with TickerProviderStateMix
       setState(() {
         stopsMap = filteredStops;
         loadingStops = false;
-        _updateMarkers();
-        _updatePolylines();
       });
+      await _updateMarkers();
+      _updatePolylines();
 
     } catch (e) {
       setState(() => loadingStops = false);
@@ -174,11 +174,21 @@ class _StationsPageState extends State<StationsPage> with TickerProviderStateMix
     }
   }
 
-  void _updateMarkers() {
-    _markers.clear();
+  BitmapDescriptor? _stopIcon;
+  BitmapDescriptor? _selectedStopIcon;
+  BitmapDescriptor? _startLineIcon;
+  BitmapDescriptor? _endLineIcon;
+
+  Future<void> _updateMarkers() async {
+    _stopIcon ??= await _getDotMarker(Colors.orange);
+    _selectedStopIcon ??= await _getDotMarker(Colors.deepPurple);
+    _startLineIcon ??= await _getDotMarker(Colors.green, size: 40);
+    _endLineIcon ??= await _getDotMarker(Colors.red, size: 40);
+
+    final Set<Marker> newMarkers = {};
 
     if (userLocation != null) {
-      _markers.add(Marker(
+      newMarkers.add(Marker(
         markerId: const MarkerId('user_location'),
         position: userLocation!,
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
@@ -194,11 +204,12 @@ class _StationsPageState extends State<StationsPage> with TickerProviderStateMix
 
        final bool isSelected = selectedStop != null && selectedStop!['name'] == name && selectedStop!['lat'] == lat;
 
-       _markers.add(Marker(
+       newMarkers.add(Marker(
          markerId: markerId,
          position: LatLng(lat, lon),
          infoWindow: InfoWindow(title: name),
-         icon: BitmapDescriptor.defaultMarkerWithHue( isSelected ? BitmapDescriptor.hueViolet : BitmapDescriptor.hueOrange),
+         icon: isSelected ? _selectedStopIcon! : _stopIcon!,
+         anchor: const Offset(0.5, 0.5),
          onTap: () => _selectStop(stop),
          zIndex: isSelected ? 2 : 1,
        ));
@@ -207,8 +218,15 @@ class _StationsPageState extends State<StationsPage> with TickerProviderStateMix
      for (final id in _displayedLines) {
       final traj = _lineTrajectories[id] ?? [];
       if (traj.isEmpty) continue;
-      _markers.add(Marker(markerId: MarkerId('start_$id'), position: traj.first, icon: _createEndpointIcon(_getLineColor(id), Icons.play_arrow)));
-      _markers.add(Marker(markerId: MarkerId('end_$id'), position: traj.last, icon: _createEndpointIcon(_getLineColor(id), Icons.stop)));
+      newMarkers.add(Marker(markerId: MarkerId('start_$id'), position: traj.first, icon: _startLineIcon!, anchor: const Offset(0.5, 0.5)));
+      newMarkers.add(Marker(markerId: MarkerId('end_$id'), position: traj.last, icon: _endLineIcon!, anchor: const Offset(0.5, 0.5)));
+    }
+
+    if (mounted) {
+      setState(() {
+        _markers.clear();
+        _markers.addAll(newMarkers);
+      });
     }
   }
 
@@ -281,16 +299,16 @@ class _StationsPageState extends State<StationsPage> with TickerProviderStateMix
       } else {
         _displayedLines.add(lineId);
       }
-      _updateMarkers();
       _updatePolylines();
     });
+    _updateMarkers();
   }
 
-  void _selectStop(Map<String, dynamic> stop) {
+  Future<void> _selectStop(Map<String, dynamic> stop) async {
     setState(() {
       selectedStop = stop;
-      _updateMarkers();
     });
+    await _updateMarkers();
 
     _mapController?.animateCamera(
       CameraUpdate.newLatLng(LatLng(stop['lat'], stop['lon'])),
@@ -323,11 +341,11 @@ class _StationsPageState extends State<StationsPage> with TickerProviderStateMix
           },
         );
       },
-    ).whenComplete(() {
+    ).whenComplete(() async {
       setState(() {
         selectedStop = null;
-        _updateMarkers();
       });
+      await _updateMarkers();
     });
   }
   
@@ -388,10 +406,33 @@ class _StationsPageState extends State<StationsPage> with TickerProviderStateMix
     return v1[t.length];
   }
   
-  BitmapDescriptor _createEndpointIcon(Color c, IconData ic) {
-      if (ic == Icons.play_arrow) return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
-      if (ic == Icons.stop) return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
-      return BitmapDescriptor.defaultMarker;
+  Future<BitmapDescriptor> _getDotMarker(Color color, {double size = 50.0}) async {
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+    final double radius = size * 0.3;
+    const double strokeWidth = 4.0;
+
+    // Shadow
+    final Paint shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(0.25)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0);
+    canvas.drawCircle(Offset(size / 2, size / 2 + 1), radius + 1, shadowPaint);
+
+    // White Border
+    final Paint borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(size / 2, size / 2), radius + strokeWidth / 2, borderPaint);
+
+    // Main Dot
+    final Paint dotPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(size / 2, size / 2), radius - strokeWidth / 2, dotPaint);
+
+    final ui.Image image = await pictureRecorder.endRecording().toImage(size.toInt(), size.toInt());
+    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(byteData!.buffer.asUint8List());
   }
 
   @override

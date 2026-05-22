@@ -41,48 +41,48 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyB3Xr-bC8utVCFUCsqJgmY_RTVczPKhjRE',
-    appId: '1:337438022636:web:b275bd8fd31057ab3fbec9',
-    messagingSenderId: '337438022636',
-    projectId: 'to-bus-tracking',
-    authDomain: 'to-bus-tracking.firebaseapp.com',
-    storageBucket: 'to-bus-tracking.firebasestorage.app',
-    measurementId: 'G-04SCD4PVW1',
+    apiKey: 'AIzaSyBoTBjKf6yuDhYz-aKkPo6c19LM-U4Zglw',
+    appId: '1:998568775119:web:ea2a824d574bb2a6e396ba',
+    messagingSenderId: '998568775119',
+    projectId: 'tobis-app',
+    authDomain: 'tobis-app.firebaseapp.com',
+    storageBucket: 'tobis-app.firebasestorage.app',
+    measurementId: 'G-G82MBCS5J7',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDKOUmGl-uU6Jmjl0vYCzSSb6C2sAgXwQE',
-    appId: '1:337438022636:android:1e8e9d639d6b82253fbec9',
-    messagingSenderId: '337438022636',
-    projectId: 'to-bus-tracking',
-    storageBucket: 'to-bus-tracking.firebasestorage.app',
+    apiKey: 'AIzaSyDZa-EKNWZi7HjH5tOqFTIeBy-vxRfM7Xs',
+    appId: '1:998568775119:android:ad0b02f3a91dc361e396ba',
+    messagingSenderId: '998568775119',
+    projectId: 'tobis-app',
+    storageBucket: 'tobis-app.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyBrtUIGYdP8DuPwwooSpymHv9pRBwZwFJo',
-    appId: '1:337438022636:ios:53119c49f99d4ee73fbec9',
-    messagingSenderId: '337438022636',
-    projectId: 'to-bus-tracking',
-    storageBucket: 'to-bus-tracking.firebasestorage.app',
+    apiKey: 'AIzaSyBtjeOefA4GzYQ1n1NlFwc57JEWEZJFttY',
+    appId: '1:998568775119:ios:e3f06e70fcc27b89e396ba',
+    messagingSenderId: '998568775119',
+    projectId: 'tobis-app',
+    storageBucket: 'tobis-app.firebasestorage.app',
     iosBundleId: 'com.example.busApp',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyBrtUIGYdP8DuPwwooSpymHv9pRBwZwFJo',
-    appId: '1:337438022636:ios:53119c49f99d4ee73fbec9',
-    messagingSenderId: '337438022636',
-    projectId: 'to-bus-tracking',
-    storageBucket: 'to-bus-tracking.firebasestorage.app',
+    apiKey: 'AIzaSyBtjeOefA4GzYQ1n1NlFwc57JEWEZJFttY',
+    appId: '1:998568775119:ios:e3f06e70fcc27b89e396ba',
+    messagingSenderId: '998568775119',
+    projectId: 'tobis-app',
+    storageBucket: 'tobis-app.firebasestorage.app',
     iosBundleId: 'com.example.busApp',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyB3Xr-bC8utVCFUCsqJgmY_RTVczPKhjRE',
-    appId: '1:337438022636:web:a6a7ba55b17530ba3fbec9',
-    messagingSenderId: '337438022636',
-    projectId: 'to-bus-tracking',
-    authDomain: 'to-bus-tracking.firebaseapp.com',
-    storageBucket: 'to-bus-tracking.firebasestorage.app',
-    measurementId: 'G-JK90ZYBE70',
+    apiKey: 'AIzaSyBoTBjKf6yuDhYz-aKkPo6c19LM-U4Zglw',
+    appId: '1:998568775119:web:ea2a824d574bb2a6e396ba',
+    messagingSenderId: '998568775119',
+    projectId: 'tobis-app',
+    authDomain: 'tobis-app.firebaseapp.com',
+    storageBucket: 'tobis-app.firebasestorage.app',
+    measurementId: 'G-G82MBCS5J7',
   );
 }

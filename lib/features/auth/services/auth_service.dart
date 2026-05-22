@@ -1,14 +1,8 @@
-
 import 'dart:async';
-
-import 'package:bus_app/features/auth/presentation/pages/login_screen/login_screen.dart';
-import 'package:bus_app/features/auth/presentation/pages/verify_email_screen.dart';
-import 'package:bus_app/features/home/presentation/pages/main_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-
-import 'profile_service.dart';
+import 'package:bus_app/features/auth/services/profile_service.dart';
 
 class AuthService extends GetxService {
   static AuthService get to => Get.find();
@@ -17,94 +11,54 @@ class AuthService extends GetxService {
   late final Rx<User?> _firebaseUser;
   Timer? _emailVerificationTimer;
 
-  // Track authentication progress
   final RxBool isLoading = false.obs;
+  final RxBool isVerified = false.obs;
 
   User? get firebaseUser => _firebaseUser.value;
+  Rx<User?> get firebaseUserObs => _firebaseUser;
 
   @override
-  void onReady() {
+  void onInit() {
+    super.onInit();
     _firebaseUser = Rx<User?>(_auth.currentUser);
+    isVerified.value = _auth.currentUser?.emailVerified ?? false;
     _firebaseUser.bindStream(_auth.userChanges());
-    // The `ever` listener is the core of the app's routing.
-    // It reacts to any change in the user's authentication state.
-    ever(_firebaseUser, _setInitialScreen);
+    ever(_firebaseUser, _onUserChanged);
   }
 
   @override
   void onClose() {
-    // Stop the timer when the service is closed to prevent memory leaks.
     _emailVerificationTimer?.cancel();
     super.onClose();
   }
 
-  // This function determines which screen to show based on the user's state.
-  _setInitialScreen(User? user) async {
-    // Cancel any existing timer when the user state changes.
-    _emailVerificationTimer?.cancel();
-
+  void _onUserChanged(User? user) {
     if (user != null) {
-      // USER IS LOGGED IN
-      await ProfileService.to.fetchUserProfile(user); // Fetch profile data
-
+      isVerified.value = user.emailVerified;
       if (user.emailVerified) {
-        // If email is verified, go to the main app.
-        Get.offAll(() => const MainPage());
-      } else {
-        // If email is NOT verified, go to the verification screen.
-        Get.offAll(() => const VerifyEmailScreen());
-        // And start a timer to automatically check for verification.
-        _startEmailVerificationTimer();
+        _emailVerificationTimer?.cancel();
       }
     } else {
-      // USER IS LOGGED OUT
-      // Clear any stale profile data and go to the login screen.
+      isVerified.value = false;
       ProfileService.to.clearUserProfile();
-      Get.offAll(() => const LoginScreen());
     }
   }
-
-  // --- Core Authentication Methods ---
 
   Future<void> createUserWithEmailAndPassword(String email, String password, String fullName) async {
     try {
       isLoading.value = true;
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
+      final userCredential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
       if (userCredential.user != null) {
-        // Create the user profile in Firestore.
         await ProfileService.to.createUserProfile(userCredential.user!, fullName);
-        // Send the verification email.
         await sendVerificationEmail();
-        // The `_setInitialScreen` listener will automatically navigate to VerifyEmailScreen.
       }
     } on FirebaseAuthException catch (e) {
-      String errorMessage = 'An unknown error occurred.';
-      if (e.code == 'email-already-in-use') {
-        errorMessage = 'Cet e-mail est déjà utilisé par un autre compte.';
-      } else if (e.code == 'weak-password') {
-        errorMessage = 'Le mot de passe est trop court.';
-      } else if (e.code == 'invalid-email') {
-        errorMessage = 'L\'adresse e-mail n\'est pas valide.';
-      } else if (e.message != null) {
-        errorMessage = e.message!;
-      }
-      
-      Get.snackbar(
-        'Erreur d\'inscription', 
-        errorMessage,
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red.withOpacity(0.8),
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      _showError(e);
     } catch (e) {
-      Get.snackbar(
-        'Erreur d\'inscription', 
-        'Une erreur inattendue s\'est produite.',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red.withOpacity(0.8),
-        colorText: Colors.white,
-      );
+      _showError(null, fallback: 'An unexpected error occurred.');
     } finally {
       isLoading.value = false;
     }
@@ -114,85 +68,118 @@ class AuthService extends GetxService {
     try {
       isLoading.value = true;
       await _auth.signInWithEmailAndPassword(email: email, password: password);
-      // The `_setInitialScreen` listener will handle navigation based on verification status.
     } on FirebaseAuthException catch (e) {
-      String errorMessage = 'An unknown error occurred.';
-      if (e.code == 'user-not-found' || e.code == 'wrong-password') {
-        errorMessage = 'E-mail ou mot de passe incorrect.';
-      } else if (e.message != null) {
-        errorMessage = e.message!;
-      }
-      
-      Get.snackbar(
-        'Erreur de connexion', 
-        errorMessage,
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red.withOpacity(0.8),
-        colorText: Colors.white,
-        duration: const Duration(seconds: 4),
-      );
+      _showError(e, isLogin: true);
     } catch (e) {
-      Get.snackbar(
-        'Erreur de connexion', 
-        'Une erreur inattendue s\'est produite.',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red.withOpacity(0.8),
-        colorText: Colors.white,
-      );
+      _showError(null, fallback: 'An unexpected error occurred.');
     } finally {
       isLoading.value = false;
     }
   }
 
   Future<void> signOut() async {
+    _emailVerificationTimer?.cancel();
     await _auth.signOut();
-    // The `_setInitialScreen` listener will handle navigation to the LoginScreen.
+    ProfileService.to.clearUserProfile();
   }
 
-  // --- Email Verification Methods ---
-
-  // Starts a timer to periodically check if the user's email has been verified.
-  void _startEmailVerificationTimer() {
-    _emailVerificationTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
-      await _firebaseUser.value?.reload();
+  void startEmailVerificationTimer() {
+    _emailVerificationTimer?.cancel();
+    _emailVerificationTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      await _auth.currentUser?.reload();
       final user = _auth.currentUser;
       if (user != null && user.emailVerified) {
-        timer.cancel();
-        // User is now verified, navigate to the main screen.
-        Get.offAll(() => const MainPage());
+        _emailVerificationTimer?.cancel();
+        isVerified.value = true;
       }
     });
   }
 
-  // Manually reloads the user to check their verification status.
   Future<void> manuallyCheckEmailVerificationStatus() async {
-    await _firebaseUser.value?.reload();
-    // The `ever` listener on _firebaseUser will automatically trigger
-    // `_setInitialScreen` if the user's state (like emailVerified) changes.
-  }
-
-  // Sends a new verification email.
-  Future<void> sendVerificationEmail() async {
-    try {
-      await _firebaseUser.value?.sendEmailVerification();
-      Get.snackbar('Email Sent', 'A new verification email has been sent to your address.');
-    } on FirebaseAuthException catch (e) {
-      // Handle errors like 'too-many-requests'.
-      Get.snackbar('Error', e.message ?? 'Could not send verification email.');
-    } catch (e) {
-      Get.snackbar('Error', 'An unexpected error occurred.');
+    await _auth.currentUser?.reload();
+    final user = _auth.currentUser;
+    if (user != null) {
+      isVerified.value = user.emailVerified;
     }
   }
 
-  // Sends a password reset email.
+  Future<void> sendVerificationEmail() async {
+    try {
+      await _auth.currentUser?.sendEmailVerification();
+      startEmailVerificationTimer();
+      Get.snackbar(
+        'Email Sent',
+        'A verification email has been sent to your address.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.green.withOpacity(0.8),
+        colorText: Colors.white,
+      );
+    } on FirebaseAuthException catch (e) {
+      Get.snackbar(
+        'Error',
+        e.message ?? 'Could not send verification email.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+      );
+    }
+  }
+
   Future<void> sendPasswordResetEmail(String email) async {
     try {
       await _auth.sendPasswordResetEmail(email: email);
-      Get.snackbar('Email Sent', 'A password reset email has been sent to your address.');
+      Get.snackbar(
+        'Email Sent',
+        'A password reset email has been sent.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.green.withOpacity(0.8),
+        colorText: Colors.white,
+      );
     } on FirebaseAuthException catch (e) {
-      Get.snackbar('Error', e.message ?? 'Could not send reset email.');
-    } catch (e) {
-      Get.snackbar('Error', 'An unexpected error occurred.');
+      Get.snackbar(
+        'Error',
+        e.message ?? 'Could not send reset email.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.8),
+        colorText: Colors.white,
+      );
     }
+  }
+
+  void _showError(FirebaseAuthException? e, {bool isLogin = false, String? fallback}) {
+    String message;
+    if (e != null) {
+      switch (e.code) {
+        case 'email-already-in-use':
+          message = 'Cet e-mail est déjà utilisé.';
+          break;
+        case 'weak-password':
+          message = 'Le mot de passe est trop court.';
+          break;
+        case 'invalid-email':
+          message = "L'adresse e-mail n'est pas valide.";
+          break;
+        case 'user-not-found':
+        case 'wrong-password':
+          message = 'E-mail ou mot de passe incorrect.';
+          break;
+        case 'too-many-requests':
+          message = 'Trop de tentatives. Réessayez plus tard.';
+          break;
+        default:
+          message = e.message ?? fallback ?? 'Une erreur est survenue.';
+      }
+    } else {
+      message = fallback ?? 'Une erreur est survenue.';
+    }
+
+    Get.snackbar(
+      isLogin ? 'Erreur de connexion' : "Erreur d'inscription",
+      message,
+      snackPosition: SnackPosition.BOTTOM,
+      backgroundColor: Colors.red.withOpacity(0.8),
+      colorText: Colors.white,
+      duration: const Duration(seconds: 4),
+    );
   }
 }

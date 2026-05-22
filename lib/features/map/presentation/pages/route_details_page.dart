@@ -363,12 +363,18 @@ class _RouteDetailsPageState extends State<RouteDetailsPage> {
                   children: [
                     const Icon(Icons.access_time, size: 18, color: AppTheme.primaryBlue),
                     const SizedBox(width: 6),
-                    Text(
-                      duration,
-                      style: const TextStyle(
-                        color: AppTheme.primaryBlue,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                    Hero(
+                      tag: 'route_duration_${widget.routeData['overview_polyline']['points']}',
+                      child: Material(
+                        color: Colors.transparent,
+                        child: Text(
+                          duration,
+                          style: const TextStyle(
+                            color: AppTheme.primaryBlue,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
                       ),
                     ),
                   ],
